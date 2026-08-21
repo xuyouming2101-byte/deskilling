@@ -1,0 +1,27 @@
+{
+  "name": "colonoscopy-assessment-platform",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "upload:video": "node scripts/upload-video.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.55.0",
+    "lucide-react": "^0.468.0",
+    "next": "^16.3.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "survey-core": "^2.5.0",
+    "survey-react-ui": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.8.0"
+  }
+}
