@@ -18,6 +18,7 @@ test("keeps response and event writes behind the trusted RPC boundary", async ()
   for (const { name, sql } of sources) {
     assert.match(sql, /security definer/, name);
     assert.doesNotMatch(sql, /security invoker/, name);
+    assert.doesNotMatch(sql, /pg_catalog\.coalesce/, name);
     assert.match(sql, /set search_path = ''/, name);
     assert.match(
       sql,

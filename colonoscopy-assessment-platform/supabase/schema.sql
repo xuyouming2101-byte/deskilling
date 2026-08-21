@@ -241,7 +241,7 @@ declare
   first_response_time_ms bigint;
   first_detection_latency_ms bigint;
 begin
-  if pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(p_participant_id, ''))) = 0 then
+  if pg_catalog.length(pg_catalog.btrim(coalesce(p_participant_id, ''))) = 0 then
     raise exception 'participant_id is required';
   end if;
 
