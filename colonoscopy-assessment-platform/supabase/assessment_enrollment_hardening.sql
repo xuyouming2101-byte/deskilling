@@ -446,8 +446,7 @@ begin
 end;
 $$;
 
--- The old nine-argument function remains an owner-only internal writer.
-revoke all on function public.submit_video_response(
+drop function if exists public.submit_video_response(
   text,
   integer,
   text,
@@ -457,7 +456,7 @@ revoke all on function public.submit_video_response(
   bigint,
   boolean,
   jsonb
-) from public, anon, authenticated;
+);
 
 drop function if exists public.submit_video_response(
   text,
@@ -781,16 +780,72 @@ begin
     raise exception 'submission must target the first unanswered queue order';
   end if;
 
-  perform public.submit_video_response(
+  insert into public.lesion_detection_events (
+    participant_id,
+    session_number,
+    video_id,
+    video_order,
+    click_index,
+    video_time_at_click,
+    response_time_ms,
+    lesion_onset_sec,
+    detection_latency_ms,
+    overridden,
+    final_valid
+  )
+  select
+    p_participant_id,
+    p_session_number,
+    p_video_id,
+    p_video_order,
+    click_row.click_index,
+    pg_catalog.round(click_row.video_time_at_click::numeric, 3)::double precision,
+    click_row.response_time_ms,
+    video_lesion_onset_sec,
+    case
+      when video_lesion_onset_sec is null then null
+      else pg_catalog.round(
+        (
+          pg_catalog.round(click_row.video_time_at_click::numeric, 3)::double precision
+          - video_lesion_onset_sec
+        ) * 1000
+      )::bigint
+    end,
+    not p_answer,
+    p_answer
+  from pg_catalog.jsonb_to_recordset(p_clicks) as click_row(
+    click_index integer,
+    video_time_at_click double precision,
+    response_time_ms bigint
+  );
+
+  insert into public.responses (
+    participant_id,
+    session_number,
+    video_id,
+    video_order,
+    answer,
+    correct,
+    response_time_ms,
+    video_time_at_click,
+    detection_latency_ms,
+    response_type,
+    video_completed,
+    no_response_latency_ms
+  )
+  values (
     p_participant_id,
     p_session_number,
     p_video_id,
     p_video_order,
     p_answer,
-    p_response_time_ms,
-    p_no_response_latency_ms,
-    p_video_completed,
-    p_clicks
+    video_has_lesion = p_answer,
+    case when p_answer then first_response_time_ms else p_response_time_ms end,
+    case when p_answer then first_video_time else null end,
+    case when p_answer then first_detection_latency_ms else null end,
+    case when p_answer then 'lesion_detected' else 'no_lesion_detected' end,
+    true,
+    case when p_answer then null else p_no_response_latency_ms end
   );
 end;
 $$;

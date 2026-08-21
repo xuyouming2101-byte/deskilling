@@ -355,6 +355,11 @@ test("makes access-code submissions ordered, mode-bound, and idempotent", async 
     assert.match(sql, /first unanswered queue order/i, name);
     assert.match(sql, /idempotent replay/i, name);
     assert.match(sql, /existing response differs from retry payload/i, name);
+    assert.doesNotMatch(
+      sql,
+      /perform public\.submit_video_response\s*\(/i,
+      name
+    );
     assert.match(
       sql,
       /if p_answer is true and p_response_time_ms <> first_response_time_ms then\s+raise exception 'positive response_time_ms must equal the first lesion click response_time_ms';/is,
