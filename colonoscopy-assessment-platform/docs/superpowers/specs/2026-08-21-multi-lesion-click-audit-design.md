@@ -172,6 +172,37 @@ The frontend does not send generated IDs or timestamps.
 - Keep private Supabase Storage and signed URL behavior unchanged.
 - Run Supabase security and performance advisors after applying the migration.
 
+## Session and Queue Boundary
+
+The browser creates one high-entropy access token for each
+`participant_id` + `session_number` and retains it only in that browser. The
+database stores only its SHA-256 digest in `assessment_session_access`; no
+browser role can read the table or recover the token. A first start creates the
+binding and a server-owned randomized queue. An existing legacy development
+queue may be claimed once when it has no binding; formal queues are never
+claimed through this compatibility path.
+
+`start_or_resume_assessment(participant_id, session_number, access_token,
+study_mode)` is the only browser-accessible queue API. It acquires a
+participant/session advisory transaction lock, validates or creates the token
+binding, applies the existing DEV/FORMAL pool rules, creates a queue only when
+absent, and returns only `video_id`, `video_order`, `bucket`, `file_path`,
+`next_video_order`, and `queue_length`. It never returns `has_lesion` or
+`lesion_onset_sec`.
+
+Anonymous clients have no direct privileges or policies on `videos`,
+`assessment_queue`, `responses`, `lesion_detection_events`, or the access
+table. The legacy `get_next_video_order` RPC is no longer browser-callable.
+A narrow SECURITY DEFINER Storage predicate confirms a signed object is a
+configured video without granting metadata reads.
+
+The token-bound submission RPC holds the same advisory lock. A new submission
+must be the first unanswered queue order. Before that check, an exactly
+matching already-committed response and complete derived click-event set is
+treated as success, so a lost HTTP acknowledgement can be retried safely. A
+different replay is rejected. Server-side code alone reads lesion truth and
+onset, computes correctness and signed latency, and derives all event flags.
+
 ## SurveyJS and React Responsibilities
 
 SurveyJS remains the final-classification model and validation boundary. React owns the repeated red detection control, per-click timing capture, visible click audit, player state, and final action buttons. The default one-shot SurveyJS radio interaction is replaced because it cannot represent repeated detection events.

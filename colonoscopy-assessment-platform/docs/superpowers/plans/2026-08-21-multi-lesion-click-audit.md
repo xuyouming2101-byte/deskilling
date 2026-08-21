@@ -1371,6 +1371,36 @@ git add colonoscopy-assessment-platform/README.md
 git commit -m "docs: explain auditable lesion response workflow"
 ~~~
 
+---
+
+### Task 7: Harden session, queue, and submit authorization
+
+**Files:**
+- Create: `supabase/session_access_hardening.sql`
+- Modify: `supabase/schema.sql`
+- Modify: `supabase/multi_lesion_click_audit.contract.test.mjs`
+- Modify: `docs/superpowers/specs/2026-08-21-multi-lesion-click-audit-design.md`
+- Modify: `docs/superpowers/plans/2026-08-21-multi-lesion-click-audit.md`
+
+**Interfaces:**
+- `start_or_resume_assessment(text, integer, text, text)` is the only browser queue API.
+- `submit_video_response(..., jsonb, text)` verifies the same session access token.
+
+- [x] Add source-contract coverage for token validation, private queue/video access,
+  server-side pool selection, ordered submit, idempotent replay, and rollback.
+- [x] Store only a SHA-256 token digest in `assessment_session_access`; revoke all
+  browser-role table access.
+- [x] Move persistent queue creation and resume into a locked SECURITY DEFINER RPC
+  that returns no lesion truth or onset metadata.
+- [x] Revoke anonymous `videos`, `assessment_queue`, and `get_next_video_order`
+  access while preserving private Storage signed URL validation through a narrow
+  SECURITY DEFINER predicate.
+- [x] Require the earliest unanswered queue order for a new response and accept only
+  exact persisted payload/event replays as idempotent success.
+- [x] Preserve server-side signed latency, raw overridden events, and the atomic
+  event-before-response transaction.
+- [ ] Apply this migration and run remote authorization, replay, and rollback tests.
+
 ## Self-Review
 
 - Every approved behavior maps to a task and a verification step.
