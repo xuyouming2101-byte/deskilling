@@ -134,11 +134,12 @@ const AssessmentVideoPlayer = forwardRef<
       return;
     }
 
+    const endedAtMs = performance.now();
     endedRef.current = true;
     setIsPlaying(false);
     setVideoEnded(true);
     onPlaybackStateChange(false);
-    onEnded(performance.now());
+    onEnded(endedAtMs);
   };
 
   const togglePlayback = () => {

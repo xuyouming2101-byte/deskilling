@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test lib/*.test.ts supabase/*.test.mjs",
+    "test": "node --test components/*.test.mjs lib/*.test.ts supabase/*.test.mjs",
     "upload:video": "node scripts/upload-video.mjs",
     "typecheck": "tsc --noEmit"
   },
