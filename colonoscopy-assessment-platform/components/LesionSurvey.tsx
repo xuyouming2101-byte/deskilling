@@ -1,121 +1,157 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { ArrowRight, Ban, ScanSearch } from "lucide-react";
+import { useCallback, useEffect, useMemo } from "react";
 import { Model } from "survey-core";
-import { Survey } from "survey-react-ui";
-import type { LesionAnswer } from "@/lib/assessmentTypes";
+import type {
+  LesionAnswer,
+  LesionDetectionClick
+} from "@/lib/assessmentTypes";
 
 type LesionSurveyProps = {
   clipId: string;
-  canDetectLesion: boolean;
+  clickCount: number;
+  clicks: readonly LesionDetectionClick[];
+  canDetect: boolean;
   canReportNoLesion: boolean;
+  canGoNext: boolean;
   locked: boolean;
-  onAnswer: (answer: LesionAnswer) => void;
+  onDetect: () => void;
+  onFinalizeYes: () => void;
+  onFinalizeNo: () => void;
 };
 
-type SurveyChoice = {
-  value: unknown;
-  setIsEnabled: (value: boolean) => void;
-};
+function formatVideoTime(seconds: number) {
+  const wholeMinutes = Math.floor(seconds / 60);
+  const remainingSeconds = (seconds % 60).toFixed(3).padStart(6, "0");
 
-type LesionQuestion = {
-  choices?: SurveyChoice[];
-};
+  return `${wholeMinutes}:${remainingSeconds}`;
+}
 
 export default function LesionSurvey({
   clipId,
-  canDetectLesion,
+  clickCount,
+  clicks,
+  canDetect,
   canReportNoLesion,
+  canGoNext,
   locked,
-  onAnswer
+  onDetect,
+  onFinalizeYes,
+  onFinalizeNo
 }: LesionSurveyProps) {
-  const submittedRef = useRef(false);
-
   const survey = useMemo(() => {
     const model = new Model({
-      showQuestionNumbers: "off",
-      showCompleteButton: false,
-      showNavigationButtons: false,
       elements: [
         {
           type: "radiogroup",
-          name: "lesionDetected",
-          title: "Answer",
+          name: "finalClassification",
           isRequired: true,
-          choices: [
-            { value: "yes", text: "Lesion detected" },
-            { value: "no", text: "No lesion detected" }
-          ]
+          choices: ["yes", "no"]
         }
       ]
     });
 
     model.focusFirstQuestionAutomatic = false;
     model.showCompletedPage = false;
-    model.clearInvisibleValues = "none";
-
     return model;
   }, [clipId]);
 
   useEffect(() => {
-    submittedRef.current = false;
-    survey.clearValue("lesionDetected");
+    survey.clearValue("finalClassification");
   }, [clipId, survey]);
 
-  useEffect(() => {
-    survey.mode = locked ? "display" : "edit";
+  const validateFinalClassification = useCallback(
+    (answer: LesionAnswer) => {
+      survey.setValue("finalClassification", answer);
+      const isValid = survey.validate(false, false);
 
-    const question = survey.getQuestionByName(
-      "lesionDetected"
-    ) as LesionQuestion | null;
-
-    for (const choice of question?.choices ?? []) {
-      if (choice.value === "yes") {
-        choice.setIsEnabled(canDetectLesion && !locked);
+      if (!isValid || survey.getValue("finalClassification") !== answer) {
+        survey.clearValue("finalClassification");
+        return false;
       }
 
-      if (choice.value === "no") {
-        choice.setIsEnabled(canReportNoLesion && !locked);
-      }
+      return true;
+    },
+    [survey]
+  );
+
+  const handleFinalizeYes = () => {
+    if (canGoNext && !locked && validateFinalClassification("yes")) {
+      onFinalizeYes();
     }
-  }, [canDetectLesion, canReportNoLesion, locked, survey]);
+  };
 
-  useEffect(() => {
-    const handleValueChanged = (
-      sender: Model,
-      options: { name: string; value: unknown }
-    ) => {
-      if (options.name !== "lesionDetected" || submittedRef.current) {
-        return;
-      }
+  const handleFinalizeNo = () => {
+    if (
+      canReportNoLesion &&
+      !locked &&
+      validateFinalClassification("no")
+    ) {
+      onFinalizeNo();
+    }
+  };
 
-      if (options.value === "yes" && canDetectLesion) {
-        submittedRef.current = true;
-        sender.mode = "display";
-        onAnswer("yes");
-        return;
-      }
-
-      if (options.value === "no" && canReportNoLesion) {
-        submittedRef.current = true;
-        sender.mode = "display";
-        onAnswer("no");
-        return;
-      }
-
-      sender.clearValue("lesionDetected");
-    };
-
-    survey.onValueChanged.add(handleValueChanged);
-
-    return () => {
-      survey.onValueChanged.remove(handleValueChanged);
-    };
-  }, [canDetectLesion, canReportNoLesion, onAnswer, survey]);
+  const showFinalActions = canReportNoLesion || canGoNext || locked;
 
   return (
     <div className="survey-shell">
-      <Survey model={survey} />
+      <div className="detection-zone">
+        <button
+          className="detection-button"
+          disabled={!canDetect || locked}
+          onClick={onDetect}
+          type="button"
+        >
+          <ScanSearch aria-hidden="true" />
+          <span>Lesion detected</span>
+        </button>
+        <p>Repeat for each visible lesion.</p>
+      </div>
+
+      <div className="detection-audit" aria-live="polite">
+        <div className="detection-count">
+          <span>Recorded marks</span>
+          <strong>{clickCount}</strong>
+        </div>
+        <ol className="detection-times" aria-label="Recorded lesion times">
+          {clicks.length === 0 ? (
+            <li className="detection-times__empty">No marks recorded</li>
+          ) : (
+            clicks.map((click) => (
+              <li key={click.click_index}>
+                <span>Mark {click.click_index}</span>
+                <time>{formatVideoTime(click.video_time_at_click)}</time>
+              </li>
+            ))
+          )}
+        </ol>
+      </div>
+
+      <div
+        aria-hidden={!showFinalActions}
+        className="final-actions"
+        data-visible={showFinalActions}
+      >
+        <button
+          className="no-lesion-button"
+          disabled={!canReportNoLesion || locked}
+          onClick={handleFinalizeNo}
+          type="button"
+        >
+          <Ban aria-hidden="true" />
+          <span>No lesion detected</span>
+        </button>
+        <button
+          className="next-video-button"
+          disabled={!canGoNext || locked}
+          onClick={handleFinalizeYes}
+          type="button"
+        >
+          <span>Next video</span>
+          <ArrowRight aria-hidden="true" />
+        </button>
+      </div>
     </div>
   );
 }

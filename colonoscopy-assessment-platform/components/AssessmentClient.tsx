@@ -9,25 +9,32 @@ import {
   RotateCcw
 } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import AssessmentVideoPlayer from "@/components/AssessmentVideoPlayer";
 import LesionSurvey from "@/components/LesionSurvey";
-import type { LesionAnswer, ResponseInsert } from "@/lib/assessmentTypes";
+import type {
+  LesionAnswer,
+  LesionDetectionClick,
+  VideoSubmission
+} from "@/lib/assessmentTypes";
+import {
+  buildVideoSubmission,
+  createLesionDetectionClick,
+  getResponseActionState
+} from "@/lib/lesionResponse";
 import {
   getStudyMode,
   isStudySessionNumber,
   STUDY_SESSION_NUMBERS
 } from "@/lib/sessionConfig";
 import {
-  insertResponse,
   isSupabaseConfigured,
   loadAssessmentSession,
+  submitVideoResponse,
   type VideoSource
 } from "@/lib/supabaseClient";
-import {
-  calculateDetectionLatencyMs,
-  captureVideoTimeAtClick
-} from "@/lib/timing";
+import { captureVideoTimeAtClick } from "@/lib/timing";
 
-type SaveState = "idle" | "saving" | "error";
+type SaveState = "idle" | "saving" | "saved" | "error";
 type Phase = "intake" | "loading" | "assessment" | "complete" | "error";
 type CompletedSession = {
   participantId: string;
@@ -44,13 +51,19 @@ export default function AssessmentClient() {
   const [intakeError, setIntakeError] = useState("");
   const [videoStarted, setVideoStarted] = useState(false);
   const [videoEnded, setVideoEnded] = useState(false);
+  const [videoPlaying, setVideoPlaying] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [videoError, setVideoError] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
-  const [lastAnswer, setLastAnswer] = useState<LesionAnswer | null>(null);
-  const [pendingPayload, setPendingPayload] = useState<ResponseInsert | null>(null);
-  const [responseLocked, setResponseLocked] = useState(false);
+  const [detectionClicks, setDetectionClicks] = useState<
+    LesionDetectionClick[]
+  >([]);
+  const [finalClassification, setFinalClassification] =
+    useState<LesionAnswer | null>(null);
+  const [pendingSubmission, setPendingSubmission] =
+    useState<VideoSubmission | null>(null);
+  const [finalizationLocked, setFinalizationLocked] = useState(false);
   const [completedSession, setCompletedSession] =
     useState<CompletedSession | null>(null);
 
@@ -59,23 +72,13 @@ export default function AssessmentClient() {
   const currentVideo = videoQueue[currentIndex] ?? null;
   const totalVideos = videoQueue.length;
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const responseLockedRef = useRef(false);
+  const detectionClicksRef = useRef<LesionDetectionClick[]>([]);
+  const finalizationGuardRef = useRef(false);
+  const submissionInFlightRef = useRef(false);
   const videoStartedAtRef = useRef<number | null>(null);
+  const videoEndedAtRef = useRef<number | null>(null);
   const normalizedParticipantId = participantId.trim();
   const parsedSessionNumber = Number.parseInt(sessionNumber, 10);
-
-  const resetResponseState = () => {
-    setVideoStarted(false);
-    setVideoEnded(false);
-    setVideoError("");
-    setSaveState("idle");
-    setSaveError("");
-    setLastAnswer(null);
-    setPendingPayload(null);
-    setResponseLocked(false);
-    responseLockedRef.current = false;
-    videoStartedAtRef.current = null;
-  };
 
   useEffect(() => {
     if (!configured) {
@@ -91,7 +94,6 @@ export default function AssessmentClient() {
     setPhase("loading");
     setLoadError("");
     setCompletedSession(null);
-    resetResponseState();
 
     try {
       const session = await loadAssessmentSession(
@@ -110,9 +112,6 @@ export default function AssessmentClient() {
             }
           : null
       );
-      setPendingPayload(null);
-      setResponseLocked(session.isComplete);
-      responseLockedRef.current = session.isComplete;
       setPhase(session.isComplete ? "complete" : "assessment");
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unable to load videos.");
@@ -141,20 +140,25 @@ export default function AssessmentClient() {
   };
 
   useEffect(() => {
-    if (!currentVideo) {
-      return;
+    if (currentVideo) {
+      console.log("current video_id", currentVideo.videoId);
     }
 
-    console.log("current video_id", currentVideo.videoId);
     setVideoStarted(false);
     setVideoEnded(false);
+    setVideoPlaying(false);
     setVideoError("");
     setSaveState("idle");
     setSaveError("");
-    setPendingPayload(null);
-    setResponseLocked(false);
-    responseLockedRef.current = false;
+    setDetectionClicks([]);
+    setFinalClassification(null);
+    setPendingSubmission(null);
+    setFinalizationLocked(false);
+    detectionClicksRef.current = [];
+    finalizationGuardRef.current = false;
+    submissionInFlightRef.current = false;
     videoStartedAtRef.current = null;
+    videoEndedAtRef.current = null;
   }, [currentVideo]);
 
   const handleVideoPlay = () => {
@@ -165,83 +169,63 @@ export default function AssessmentClient() {
     setVideoStarted(true);
   };
 
-  const handleVideoEnded = () => {
+  const handleVideoEnded = (endedAtMs: number) => {
+    videoEndedAtRef.current = endedAtMs;
     setVideoEnded(true);
   };
 
-  const saveAnswer = async (answer: LesionAnswer, payload?: ResponseInsert) => {
-    if (!payload && (!currentVideo || responseLockedRef.current)) {
+  const handleDetect = () => {
+    const playbackStartedAtMs = videoStartedAtRef.current;
+
+    if (
+      !currentVideo ||
+      !videoRef.current ||
+      playbackStartedAtMs === null ||
+      videoEndedAtRef.current !== null ||
+      finalizationGuardRef.current ||
+      videoError
+    ) {
       return;
     }
 
-    if (!payload && answer === "yes" && !videoStarted) {
+    const nowMs = performance.now();
+    const click = createLesionDetectionClick({
+      clickIndex: detectionClicksRef.current.length + 1,
+      videoTimeSec: captureVideoTimeAtClick(videoRef.current),
+      nowMs,
+      playbackStartedAtMs,
+      lesionOnsetSec: currentVideo.lesionOnsetSec
+    });
+    const nextClicks = [...detectionClicksRef.current, click];
+    detectionClicksRef.current = nextClicks;
+    setDetectionClicks(nextClicks);
+    console.log("lesion detection click", {
+      video_id: currentVideo.videoId,
+      ...click
+    });
+  };
+
+  const submitPendingSubmission = async (submission: VideoSubmission) => {
+    if (submissionInFlightRef.current) {
       return;
     }
 
-    if (!payload && answer === "no" && !videoEnded) {
-      return;
-    }
-
-    const now = performance.now();
-    const videoTimeAtClick = payload
-      ? payload.video_time_at_click
-      : captureVideoTimeAtClick(videoRef.current);
-    const responseTimeMs = payload
-      ? payload.response_time_ms
-      : Math.max(0, Math.round(now - (videoStartedAtRef.current ?? now)));
-    const lesionOnsetSec = currentVideo?.lesionOnsetSec ?? null;
-    const detectionLatencyMs = payload
-      ? payload.detection_latency_ms
-      : calculateDetectionLatencyMs(answer, videoTimeAtClick, lesionOnsetSec);
-    const responsePayload =
-      payload ??
-      ({
-        participant_id: normalizedParticipantId,
-        session_number: parsedSessionNumber,
-        video_id: currentVideo!.videoId,
-        video_order: currentVideo!.videoOrder,
-        answer,
-        correct: currentVideo!.hasLesion === (answer === "yes"),
-        response_type:
-          answer === "yes" ? "lesion_detected" : "no_lesion_detected",
-        response_time_ms: responseTimeMs,
-        video_time_at_click: videoTimeAtClick,
-        detection_latency_ms: detectionLatencyMs,
-        video_completed: videoEnded
-      } satisfies ResponseInsert);
-
-    if (!payload && answer === "yes") {
-      console.log("lesion detection timing", {
-        video_id: currentVideo!.videoId,
-        video_time_at_click: videoTimeAtClick,
-        lesion_onset_sec: lesionOnsetSec,
-        detection_latency_ms: detectionLatencyMs
-      });
-    }
-
-    if (!payload) {
-      responseLockedRef.current = true;
-      setResponseLocked(true);
-    }
-
+    submissionInFlightRef.current = true;
     setSaveState("saving");
     setSaveError("");
-    setLastAnswer(answer);
-    setPendingPayload(responsePayload);
 
     try {
-      await insertResponse(responsePayload);
-      setPendingPayload(null);
+      await submitVideoResponse(submission);
+      setSaveState("saved");
 
       const nextIndex = currentIndex + 1;
 
       if (nextIndex >= totalVideos) {
         setCompletedSession({
-          participantId: normalizedParticipantId,
-          sessionNumber: parsedSessionNumber,
+          participantId: submission.participant_id,
+          sessionNumber: submission.session_number,
           totalVideos
         });
-        setPendingPayload(null);
         setPhase("complete");
         return;
       }
@@ -252,7 +236,57 @@ export default function AssessmentClient() {
       setSaveError(
         error instanceof Error ? error.message : "Unable to save response."
       );
+    } finally {
+      submissionInFlightRef.current = false;
     }
+  };
+
+  const finalizeVideo = (finalClassification: LesionAnswer) => {
+    const playbackStartedAtMs = videoStartedAtRef.current;
+    const videoEndedAtMs = videoEndedAtRef.current;
+
+    if (
+      !currentVideo ||
+      playbackStartedAtMs === null ||
+      videoEndedAtMs === null ||
+      finalizationGuardRef.current ||
+      (finalClassification === "yes" && detectionClicksRef.current.length === 0)
+    ) {
+      return;
+    }
+
+    const submission = buildVideoSubmission(
+      {
+        participant_id: normalizedParticipantId,
+        session_number: parsedSessionNumber,
+        video_id: currentVideo.videoId,
+        video_order: currentVideo.videoOrder,
+        finalClassification,
+        clicks: detectionClicksRef.current,
+        nowMs: performance.now(),
+        playbackStartedAtMs,
+        videoEndedAtMs
+      }
+    );
+    finalizationGuardRef.current = true;
+    setFinalizationLocked(true);
+    setFinalClassification(finalClassification);
+    setPendingSubmission(submission);
+
+    if (finalClassification === "no") {
+      detectionClicksRef.current = [];
+      setDetectionClicks([]);
+    }
+
+    void submitPendingSubmission(submission);
+  };
+
+  const retrySubmission = () => {
+    if (!pendingSubmission) {
+      return;
+    }
+
+    void submitPendingSubmission(pendingSubmission);
   };
 
   const prepareNewSession = () => {
@@ -268,22 +302,19 @@ export default function AssessmentClient() {
     setLoadError("");
     setIntakeError("");
     setCompletedSession(null);
-    resetResponseState();
 
     if (Number.isInteger(nextSessionNumber) && isStudySessionNumber(nextSessionNumber)) {
       setSessionNumber(String(nextSessionNumber));
     }
   };
 
-  const canAnswer =
-    phase === "assessment" &&
-    Boolean(currentVideo) &&
-    configured &&
-    videoStarted &&
-    !responseLocked &&
-    !videoError &&
-    saveState !== "saving";
-  const canReportNoLesion = canAnswer && videoEnded;
+  const actionState = getResponseActionState({
+    videoStarted:
+      phase === "assessment" && Boolean(currentVideo) && configured && videoStarted,
+    videoEnded,
+    clickCount: detectionClicks.length,
+    locked: finalizationLocked || Boolean(videoError)
+  });
 
   const progressPercent =
     totalVideos > 0 ? Math.round(((currentIndex + 1) / totalVideos) * 100) : 0;
@@ -408,26 +439,29 @@ export default function AssessmentClient() {
 
           <div className="assessment-grid">
             <section className="video-panel" aria-label="Current colonoscopy video">
-              <video
-                key={currentVideo.videoId}
+              <AssessmentVideoPlayer
                 ref={videoRef}
-                controls
-                controlsList="nodownload noplaybackrate"
+                key={currentVideo.videoId}
+                locked={finalizationLocked}
                 onEnded={handleVideoEnded}
-                onError={() =>
+                onPlaybackStarted={handleVideoPlay}
+                onPlaybackStateChange={setVideoPlaying}
+                onVideoError={() =>
                   setVideoError(`Cannot play signed URL for ${currentVideo.videoId}.`)
                 }
-                onPlay={handleVideoPlay}
-                playsInline
-                preload="metadata"
-                src={currentVideo.signedUrl}
+                signedUrl={currentVideo.signedUrl}
+                videoId={currentVideo.videoId}
               />
               <div className="video-caption">
                 <span>{currentVideo.videoId}</span>
                 <span>
-                  {videoStarted
-                    ? "Playback started"
-                    : `${currentVideo.bucket}/${currentVideo.filePath}`}
+                  {videoEnded
+                    ? "Playback complete"
+                    : videoPlaying
+                      ? "Playing"
+                      : videoStarted
+                        ? "Paused"
+                        : `${currentVideo.bucket}/${currentVideo.filePath}`}
                 </span>
               </div>
             </section>
@@ -455,58 +489,72 @@ export default function AssessmentClient() {
                 </div>
               )}
 
-              {videoStarted && !videoEnded && !videoError && !responseLocked && (
+              {videoStarted && !videoEnded && !videoError && !finalizationLocked && (
                 <div className="pending-state">
                   <div className="pulse-dot" />
-                  <span>Click Lesion detected when a lesion is visible.</span>
+                  <span>Detection is active.</span>
                 </div>
               )}
 
-              {videoEnded && !responseLocked && !videoError && (
+              {videoEnded && !finalizationLocked && !videoError && (
                 <div className="pending-state">
                   <div className="pulse-dot" />
-                  <span>Video ended. No lesion detected is now available.</span>
+                  <span>Choose the final classification.</span>
                 </div>
               )}
 
               <LesionSurvey
                 clipId={currentVideo.videoId}
-                canDetectLesion={canAnswer}
-                canReportNoLesion={canReportNoLesion}
-                locked={responseLocked || saveState === "saving"}
-                onAnswer={(answer) => void saveAnswer(answer)}
+                clickCount={detectionClicks.length}
+                clicks={detectionClicks}
+                canDetect={actionState.canDetect}
+                canReportNoLesion={actionState.canReportNoLesion}
+                canGoNext={actionState.canGoNext}
+                locked={finalizationLocked}
+                onDetect={handleDetect}
+                onFinalizeNo={() => finalizeVideo("no")}
+                onFinalizeYes={() => finalizeVideo("yes")}
               />
 
-              {saveState === "saving" && (
-                <div className="saving-state">
-                  <div className="spinner" />
-                  <span>Writing response</span>
-                </div>
-              )}
-
-              {lastAnswer && saveState === "idle" && currentIndex > 0 && (
-                <div className="saved-state">
-                  <CheckCircle2 size={24} aria-hidden="true" />
-                  <span>Previous response recorded.</span>
-                </div>
-              )}
-
-              {saveState === "error" && pendingPayload && (
-                <div className="save-error">
-                  <div className="alert-box critical">
-                    <AlertTriangle size={18} aria-hidden="true" />
-                    <span>{saveError}</span>
+              <div className="submission-status" aria-live="polite">
+                {saveState === "saving" && (
+                  <div className="saving-state">
+                    <div className="spinner" />
+                    <span>Saving final response</span>
                   </div>
-                  <button
-                    className="secondary-button"
-                    onClick={() => void saveAnswer(pendingPayload.answer, pendingPayload)}
-                    type="button"
-                  >
-                    <RotateCcw size={18} aria-hidden="true" />
-                    <span>Retry locked response</span>
-                  </button>
-                </div>
-              )}
+                )}
+
+                {saveState === "saved" && (
+                  <div className="saved-state">
+                    <CheckCircle2 size={24} aria-hidden="true" />
+                    <span>Response saved.</span>
+                  </div>
+                )}
+
+                {saveState === "error" && pendingSubmission && (
+                  <div className="save-error">
+                    <div className="alert-box critical">
+                      <AlertTriangle size={18} aria-hidden="true" />
+                      <span>{saveError}</span>
+                    </div>
+                    <button
+                      className="secondary-button"
+                      disabled={submissionInFlightRef.current}
+                      onClick={retrySubmission}
+                      type="button"
+                    >
+                      <RotateCcw size={18} aria-hidden="true" />
+                      <span>Retry submission</span>
+                    </button>
+                  </div>
+                )}
+
+                {saveState === "idle" && finalClassification && (
+                  <span className="submission-status__label">
+                    Final classification: {finalClassification}
+                  </span>
+                )}
+              </div>
             </aside>
           </div>
         </section>

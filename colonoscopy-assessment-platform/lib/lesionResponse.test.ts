@@ -161,6 +161,32 @@ test("negative summary has no detection time and preserves overridden raw clicks
   assert.deepEqual(submission.clicks, [rawClick]);
 });
 
+test("builds a deeply immutable pending submission snapshot", () => {
+  const rawClicks = [
+    {
+      click_index: 1,
+      video_time_at_click: 2.125,
+      response_time_ms: 4_100,
+      detection_latency_ms: -875
+    }
+  ];
+  const submission = buildVideoSubmission({
+    ...identity,
+    finalClassification: "no",
+    clicks: rawClicks,
+    nowMs: 9_125,
+    playbackStartedAtMs: 1_000,
+    videoEndedAtMs: 8_000
+  });
+
+  rawClicks.length = 0;
+
+  assert.equal(submission.clicks.length, 1);
+  assert.equal(Object.isFrozen(submission), true);
+  assert.equal(Object.isFrozen(submission.clicks), true);
+  assert.equal(Object.isFrozen(submission.clicks[0]), true);
+});
+
 test("rejects a positive final classification without lesion clicks", () => {
   assert.throws(
     () =>

@@ -83,8 +83,11 @@ export function buildVideoSubmission(
   }
 
   const isPositive = args.finalClassification === "yes";
+  const clicks = Object.freeze(
+    args.clicks.map((click) => Object.freeze({ ...click }))
+  );
 
-  return {
+  return Object.freeze({
     participant_id: args.participant_id,
     session_number: args.session_number,
     video_id: args.video_id,
@@ -103,8 +106,8 @@ export function buildVideoSubmission(
       ? null
       : Math.max(0, Math.round(args.nowMs - args.videoEndedAtMs)),
     video_completed: true,
-    clicks: args.clicks.map((click) => ({ ...click }))
-  };
+    clicks
+  });
 }
 
 export function buildSubmissionRpcParams(submission: VideoSubmission) {

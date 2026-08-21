@@ -1,9 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import {
-  RESPONSE_INSERT_COLUMNS,
-  type ResponseInsert,
-  type VideoSubmission
-} from "@/lib/assessmentTypes";
+import type { VideoSubmission } from "@/lib/assessmentTypes";
 import { buildSubmissionRpcParams } from "@/lib/lesionResponse";
 import { shuffleItems } from "@/lib/randomize";
 import {
@@ -12,16 +8,8 @@ import {
   type StudyMode
 } from "@/lib/sessionConfig";
 
-const TABLE_NAME = "responses";
 const QUEUE_TABLE_NAME = "assessment_queue";
 const NEXT_VIDEO_ORDER_FUNCTION = "get_next_video_order";
-const FORBIDDEN_RESPONSE_COLUMNS = ["id", "created_at"] as const;
-const BIGINT_RESPONSE_COLUMNS = [
-  "session_number",
-  "video_order",
-  "response_time_ms",
-  "detection_latency_ms"
-] as const;
 
 let client: SupabaseClient | null = null;
 
@@ -92,73 +80,6 @@ export function getSupabaseClient() {
   }
 
   return client;
-}
-
-export async function insertResponse(response: ResponseInsert) {
-  const supabase = getSupabaseClient();
-
-  if (!supabase) {
-    throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY."
-    );
-  }
-
-  const allowedColumns = new Set<string>(RESPONSE_INSERT_COLUMNS);
-  const forbiddenColumns = FORBIDDEN_RESPONSE_COLUMNS.filter(
-    (column) => column in response
-  );
-  const unexpectedColumns = Object.keys(response).filter(
-    (column) => !allowedColumns.has(column)
-  );
-
-  if (forbiddenColumns.length > 0) {
-    throw new Error(
-      `Response payload must not send generated columns: ${forbiddenColumns.join(", ")}.`
-    );
-  }
-
-  if (unexpectedColumns.length > 0) {
-    throw new Error(
-      `Response payload contains non-schema columns: ${unexpectedColumns.join(", ")}.`
-    );
-  }
-
-  const invalidBigintColumns = BIGINT_RESPONSE_COLUMNS.filter((column) => {
-    const value = response[column];
-
-    return value !== null && typeof value !== "number";
-  });
-
-  if (invalidBigintColumns.length > 0) {
-    throw new Error(
-      `Response payload has non-numeric bigint values: ${invalidBigintColumns.join(", ")}.`
-    );
-  }
-
-  console.log("response insert payload", response);
-
-  const result = await supabase.from(TABLE_NAME).insert(response);
-
-  console.log("response insert result", {
-    participant_id: response.participant_id,
-    session_number: response.session_number,
-    video_id: response.video_id,
-    video_order: response.video_order,
-    answer: response.answer,
-    correct: response.correct,
-    response_type: response.response_type,
-    response_time_ms: response.response_time_ms,
-    video_time_at_click: response.video_time_at_click,
-    detection_latency_ms: response.detection_latency_ms,
-    video_completed: response.video_completed,
-    result
-  });
-
-  if (result.error) {
-    throw new Error(result.error.message);
-  }
-
-  return result;
 }
 
 export async function submitVideoResponse(submission: VideoSubmission) {
