@@ -9,7 +9,7 @@ Minimal Next.js assessment loop:
 5. Call `get_next_video_order(participant_id, session_number)` and resume at that persisted `video_order`.
 6. Create a signed URL for each private Supabase Storage object using its `bucket` and `file_path`.
 7. Show `Video X / queue length` and play the current video with task-specific, seek-free controls.
-8. After playback starts, let the participant use `Lesion detected` repeatedly; each click records a distinct media time and playback-start elapsed time.
+8. After playback starts, let the participant use `Lesion detected` repeatedly; each click separately records millisecond-precision media time and playback-start elapsed time.
 9. After the actual HTML5 `ended` event, finalize exactly one response: `Next video` submits `yes` when at least one click exists, while `No lesion detected` submits `no` and overrides any prior clicks.
 10. Submit the final classification and raw click audit atomically through `submit_video_response`, then advance only after a successful response.
 11. Show a completion page after every queued video has a saved response.
