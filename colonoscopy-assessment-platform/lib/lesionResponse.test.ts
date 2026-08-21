@@ -82,6 +82,30 @@ test("enables final actions only after the video ends", () => {
   );
 });
 
+test("disables every action before playback starts", () => {
+  assert.deepEqual(
+    getResponseActionState({
+      videoStarted: false,
+      videoEnded: false,
+      clickCount: 0,
+      locked: false
+    }),
+    { canDetect: false, canReportNoLesion: false, canGoNext: false }
+  );
+});
+
+test("disables every action while the response is locked", () => {
+  assert.deepEqual(
+    getResponseActionState({
+      videoStarted: true,
+      videoEnded: true,
+      clickCount: 2,
+      locked: true
+    }),
+    { canDetect: false, canReportNoLesion: false, canGoNext: false }
+  );
+});
+
 test("positive summary uses the first valid lesion click", () => {
   const submission = buildVideoSubmission({
     ...identity,

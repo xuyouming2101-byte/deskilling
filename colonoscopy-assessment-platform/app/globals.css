@@ -342,6 +342,95 @@ h2 {
   font-weight: 760;
 }
 
+.assessment-video-player {
+  overflow: hidden;
+  border: 1px solid #0f1613;
+  border-radius: 8px;
+  background: var(--monitor);
+  box-shadow: var(--shadow);
+}
+
+.assessment-video-player video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--monitor);
+}
+
+.assessment-video-player__controls {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: #111815;
+}
+
+.assessment-video-player__button-group {
+  display: flex;
+  gap: 8px;
+}
+
+.assessment-video-player__icon-button {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  flex: 0 0 36px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #eef5ef;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.assessment-video-player__icon-button:hover:not(:disabled) {
+  border-color: rgba(96, 198, 181, 0.82);
+  background: rgba(0, 107, 95, 0.56);
+}
+
+.assessment-video-player__icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.assessment-video-player__timeline {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.assessment-video-player__progress {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.17);
+}
+
+.assessment-video-player__progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--teal);
+  transition: width 160ms linear;
+}
+
+.assessment-video-player__time {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 760;
+  line-height: 1;
+}
+
 .response-panel {
   display: grid;
   gap: 18px;
@@ -568,5 +657,14 @@ h2 {
     flex-direction: column;
     justify-content: center;
     padding: 10px 12px;
+  }
+
+  .assessment-video-player__controls {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .assessment-video-player__button-group {
+    justify-content: space-between;
   }
 }
