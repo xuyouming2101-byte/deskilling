@@ -1,4 +1,26 @@
 export type LesionAnswer = "yes" | "no";
+
+export type LesionDetectionClick = {
+  click_index: number;
+  video_time_at_click: number;
+  response_time_ms: number;
+  detection_latency_ms: number | null;
+};
+
+export type VideoSubmission = {
+  participant_id: string;
+  session_number: number;
+  video_id: string;
+  video_order: number;
+  final_answer: boolean;
+  response_time_ms: number;
+  summary_video_time_at_click: number | null;
+  summary_detection_latency_ms: number | null;
+  no_response_latency_ms: number | null;
+  video_completed: true;
+  clicks: readonly LesionDetectionClick[];
+};
+
 export type ResponseType = "lesion_detected" | "no_lesion_detected";
 
 export const RESPONSE_INSERT_COLUMNS = [

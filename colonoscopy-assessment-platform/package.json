@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "node --test lib/*.test.ts",
     "upload:video": "node scripts/upload-video.mjs",
     "typecheck": "tsc --noEmit"
   },
