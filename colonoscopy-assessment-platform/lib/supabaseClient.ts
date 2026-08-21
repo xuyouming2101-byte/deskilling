@@ -1,8 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   RESPONSE_INSERT_COLUMNS,
-  type ResponseInsert
+  type ResponseInsert,
+  type VideoSubmission
 } from "@/lib/assessmentTypes";
+import { buildSubmissionRpcParams } from "@/lib/lesionResponse";
 import { shuffleItems } from "@/lib/randomize";
 import {
   FORMAL_VIDEOS_PER_SESSION,
@@ -151,6 +153,27 @@ export async function insertResponse(response: ResponseInsert) {
     video_completed: response.video_completed,
     result
   });
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  return result;
+}
+
+export async function submitVideoResponse(submission: VideoSubmission) {
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY."
+    );
+  }
+
+  const params = buildSubmissionRpcParams(submission);
+  console.log("submit_video_response payload", params);
+  const result = await supabase.rpc("submit_video_response", params);
+  console.log("submit_video_response result", result);
 
   if (result.error) {
     throw new Error(result.error.message);

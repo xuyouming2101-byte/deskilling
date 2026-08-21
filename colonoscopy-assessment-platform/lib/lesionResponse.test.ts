@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildSubmissionRpcParams,
   buildVideoSubmission,
   createLesionDetectionClick,
   getResponseActionState
@@ -149,4 +150,42 @@ test("rejects a positive final classification without lesion clicks", () => {
       }),
     /requires at least one lesion click/
   );
+});
+
+test("maps a final submission to the exact RPC parameter contract", () => {
+  const params = buildSubmissionRpcParams({
+    ...identity,
+    final_answer: false,
+    response_time_ms: 8_125,
+    summary_video_time_at_click: null,
+    summary_detection_latency_ms: null,
+    no_response_latency_ms: 1_125,
+    video_completed: true,
+    clicks: [
+      {
+        click_index: 1,
+        video_time_at_click: 2.125,
+        response_time_ms: 4_100,
+        detection_latency_ms: -875
+      }
+    ]
+  });
+
+  assert.deepEqual(params, {
+    p_participant_id: "P001",
+    p_session_number: 1,
+    p_video_id: "video_001",
+    p_video_order: 1,
+    p_answer: false,
+    p_response_time_ms: 8_125,
+    p_no_response_latency_ms: 1_125,
+    p_video_completed: true,
+    p_clicks: [
+      {
+        click_index: 1,
+        video_time_at_click: 2.125,
+        response_time_ms: 4_100
+      }
+    ]
+  });
 });

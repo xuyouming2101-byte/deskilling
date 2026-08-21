@@ -106,3 +106,21 @@ export function buildVideoSubmission(
     clicks: args.clicks.map((click) => ({ ...click }))
   };
 }
+
+export function buildSubmissionRpcParams(submission: VideoSubmission) {
+  return {
+    p_participant_id: submission.participant_id,
+    p_session_number: submission.session_number,
+    p_video_id: submission.video_id,
+    p_video_order: submission.video_order,
+    p_answer: submission.final_answer,
+    p_response_time_ms: submission.response_time_ms,
+    p_no_response_latency_ms: submission.no_response_latency_ms,
+    p_video_completed: submission.video_completed,
+    p_clicks: submission.clicks.map((click) => ({
+      click_index: click.click_index,
+      video_time_at_click: click.video_time_at_click,
+      response_time_ms: click.response_time_ms
+    }))
+  };
+}
