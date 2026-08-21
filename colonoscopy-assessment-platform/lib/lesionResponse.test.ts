@@ -183,7 +183,7 @@ test("rejects a positive final classification without lesion clicks", () => {
   );
 });
 
-test("maps a final submission and access token to the exact RPC parameter contract", () => {
+test("maps a final submission and access code to the exact RPC parameter contract", () => {
   const params = buildSubmissionRpcParams({
     ...identity,
     final_answer: false,
@@ -197,7 +197,7 @@ test("maps a final submission and access token to the exact RPC parameter contra
         response_time_ms: 4_100
       }
     ]
-  }, "a-secure-browser-local-token-that-is-long-enough");
+  }, "coordinator-access-code-that-is-long-enough");
 
   assert.deepEqual(params, {
     p_participant_id: "P001",
@@ -208,7 +208,7 @@ test("maps a final submission and access token to the exact RPC parameter contra
     p_response_time_ms: 8_125,
     p_no_response_latency_ms: 1_125,
     p_video_completed: true,
-    p_access_token: "a-secure-browser-local-token-that-is-long-enough",
+    p_access_code: "coordinator-access-code-that-is-long-enough",
     p_clicks: [
       {
         click_index: 1,
@@ -219,7 +219,7 @@ test("maps a final submission and access token to the exact RPC parameter contra
   });
 });
 
-test("maps an identical submission and token to identical retry parameters", () => {
+test("maps an identical submission and access code to identical retry parameters", () => {
   const submission = buildVideoSubmission({
     ...identity,
     finalClassification: "no",
@@ -228,10 +228,10 @@ test("maps an identical submission and token to identical retry parameters", () 
     playbackStartedAtMs: 1_000,
     videoEndedAtMs: 8_000
   });
-  const accessToken = "one-fixed-browser-token-for-every-retry";
+  const accessCode = "one-fixed-coordinator-code-for-every-retry";
 
-  const firstAttempt = buildSubmissionRpcParams(submission, accessToken);
-  const retryAttempt = buildSubmissionRpcParams(submission, accessToken);
+  const firstAttempt = buildSubmissionRpcParams(submission, accessCode);
+  const retryAttempt = buildSubmissionRpcParams(submission, accessCode);
 
   assert.deepEqual(retryAttempt, firstAttempt);
   assert.deepEqual(retryAttempt, {
@@ -243,7 +243,7 @@ test("maps an identical submission and token to identical retry parameters", () 
     p_response_time_ms: 8_125,
     p_no_response_latency_ms: 1_125,
     p_video_completed: true,
-    p_access_token: "one-fixed-browser-token-for-every-retry",
+    p_access_code: "one-fixed-coordinator-code-for-every-retry",
     p_clicks: []
   });
 });

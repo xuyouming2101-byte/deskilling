@@ -26,10 +26,16 @@ this MVP only validates the technical multi-session workflow.
 
 2. For a fresh project, run `supabase/schema.sql` in the Supabase SQL editor.
    For an existing project that already has the previous hardening migrations,
-   apply `supabase/assessment_enrollment_hardening.sql` instead. Task 10 does
-   not deploy this migration remotely.
+   apply `supabase/assessment_enrollment_hardening.sql` instead.
 
-3. Copy `.env.example` to `.env.local` and fill in:
+3. Deploy `supabase/functions/issue-assessment-video-url`. Its checked-in
+   `supabase/config.toml` sets `verify_jwt = false` because the browser uses a
+   publishable key rather than a user JWT. The function performs its own
+   authorization with the coordinator-issued access code and the
+   service-role-only current-video RPC. Keep the platform-provided
+   `SUPABASE_SERVICE_ROLE_KEY` inside the Edge Function runtime only.
+
+4. Copy `.env.example` to `.env.local` and fill in:
 
    ```bash
    NEXT_PUBLIC_SUPABASE_URL=...
@@ -41,7 +47,7 @@ this MVP only validates the technical multi-session workflow.
    `SUPABASE_SERVICE_ROLE_KEY` to browser code; it is reserved for trusted
    upload tooling and the current-video Edge Function.
 
-4. Provision one enrollment per participant and session. Use a unique,
+5. Provision one enrollment per participant and session. Use a unique,
    high-entropy access code of at least 20 characters and give the plaintext
    code to the participant through the study's controlled channel. PostgreSQL
    stores only its SHA-256 digest:
@@ -83,7 +89,7 @@ this MVP only validates the technical multi-session workflow.
    only if its videos and contiguous order exactly match the eligible pool for
    the enrollment/runtime mode.
 
-5. Confirm the private Supabase Storage objects exist and the `videos` table contains the eligible assessment videos:
+6. Confirm the private Supabase Storage objects exist and the `videos` table contains the eligible assessment videos:
 
    ```text
    video_id: stable unique ID, for example video_001
@@ -125,16 +131,16 @@ this MVP only validates the technical multi-session workflow.
    npm run upload:video -- "/absolute/path/to/video-under-50mb.mp4" "video_001" "video_001.mp4"
    ```
 
-6. Start the app:
+7. Start the app:
 
    ```bash
    npm run dev
    ```
 
-The Task 10 SQL contract intentionally removes anonymous Storage access and no
-longer returns `bucket` or `file_path` from the browser queue RPC. Deploy it only
-together with the companion Edge Function and frontend access-code integration;
-those files are outside Task 10's database/docs scope.
+The enrollment migration, Edge Function, and frontend access-code integration
+must be released together. The migration removes anonymous Storage access and
+stops returning `bucket` or `file_path` from the browser queue RPC; the Edge
+Function is the only runtime path that can authorize and sign the current video.
 
 ## Atomic response and click audit data
 

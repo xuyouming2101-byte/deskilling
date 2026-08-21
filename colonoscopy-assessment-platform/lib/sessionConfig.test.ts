@@ -1,120 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import * as sessionConfig from "./sessionConfig.ts";
+import {
+  buildStartOrResumeRpcParams,
+  validateAssessmentAccessCode
+} from "./sessionConfig.ts";
 
-type StorageLike = {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-};
-
-type AccessTokenDependencies = {
-  storage: StorageLike;
-  getRandomValues(bytes: Uint8Array): Uint8Array;
-};
-
-type SessionConfigApi = {
-  getOrCreateAssessmentAccessToken(
-    participantId: string,
-    sessionNumber: number,
-    dependencies: AccessTokenDependencies
-  ): string;
-  buildStartOrResumeRpcParams(
-    participantId: string,
-    sessionNumber: number,
-    accessToken: string
-  ): Record<string, unknown>;
-};
-
-const api = sessionConfig as typeof sessionConfig & SessionConfigApi;
-
-function createFakeStorage() {
-  const values = new Map<string, string>();
-
-  return {
-    values,
-    storage: {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        values.set(key, value);
-      }
-    } satisfies StorageLike
-  };
-}
-
-test("reuses one generated token for the same participant and session", () => {
-  const { values, storage } = createFakeStorage();
-  let randomCalls = 0;
-  const dependencies: AccessTokenDependencies = {
-    storage,
-    getRandomValues: (bytes) => {
-      randomCalls += 1;
-      bytes.forEach((_, index) => {
-        bytes[index] = index;
-      });
-      return bytes;
-    }
-  };
-
-  const first = api.getOrCreateAssessmentAccessToken("P001", 1, dependencies);
-  const second = api.getOrCreateAssessmentAccessToken("P001", 1, dependencies);
-
+test("normalizes a coordinator-issued access code", () => {
   assert.equal(
-    first,
-    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    validateAssessmentAccessCode("  dev-access-code-0123456789  "),
+    "dev-access-code-0123456789"
   );
-  assert.equal(second, first);
-  assert.equal(randomCalls, 1);
-  assert.deepEqual([...values.entries()], [
-    ["assessment-access:v1:P001:1", first]
-  ]);
 });
 
-test("isolates access tokens by participant session", () => {
-  const { values, storage } = createFakeStorage();
-  let seed = 16;
-  const dependencies: AccessTokenDependencies = {
-    storage,
-    getRandomValues: (bytes) => {
-      bytes.fill(seed);
-      seed += 16;
-      return bytes;
-    }
-  };
-
-  const sessionOne = api.getOrCreateAssessmentAccessToken(
-    "P001",
-    1,
-    dependencies
+test("rejects an access code shorter than the database contract", () => {
+  assert.throws(
+    () => validateAssessmentAccessCode("short-code"),
+    /at least 20 characters/
   );
-  const sessionTwo = api.getOrCreateAssessmentAccessToken(
-    "P001",
-    2,
-    dependencies
-  );
-
-  assert.equal(sessionOne, "10".repeat(32));
-  assert.equal(sessionTwo, "20".repeat(32));
-  assert.notEqual(sessionOne, sessionTwo);
-  assert.deepEqual([...values.keys()], [
-    "assessment-access:v1:P001:1",
-    "assessment-access:v1:P001:2"
-  ]);
 });
 
-test("builds exactly the three start RPC parameters", () => {
-  const params = api.buildStartOrResumeRpcParams(
+test("builds exactly the three access-code start RPC parameters", () => {
+  const params = buildStartOrResumeRpcParams(
     "P001",
     2,
-    "browser-token"
+    "coordinator-code-0123456789"
   );
 
   assert.deepEqual(params, {
     p_participant_id: "P001",
     p_session_number: 2,
-    p_access_token: "browser-token"
+    p_access_code: "coordinator-code-0123456789"
   });
   assert.deepEqual(Object.keys(params).sort(), [
-    "p_access_token",
+    "p_access_code",
     "p_participant_id",
     "p_session_number"
   ]);

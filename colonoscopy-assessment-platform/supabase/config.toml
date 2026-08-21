@@ -1,0 +1,2 @@
+[functions.issue-assessment-video-url]
+verify_jwt = false

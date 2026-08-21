@@ -101,7 +101,7 @@ export function buildVideoSubmission(
 
 export function buildSubmissionRpcParams(
   submission: VideoSubmission,
-  accessToken: string
+  accessCode: string
 ) {
   return {
     p_participant_id: submission.participant_id,
@@ -112,7 +112,7 @@ export function buildSubmissionRpcParams(
     p_response_time_ms: submission.response_time_ms,
     p_no_response_latency_ms: submission.no_response_latency_ms,
     p_video_completed: submission.video_completed,
-    p_access_token: accessToken,
+    p_access_code: accessCode,
     p_clicks: submission.clicks.map((click) => ({
       click_index: click.click_index,
       video_time_at_click: click.video_time_at_click,

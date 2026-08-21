@@ -22,16 +22,17 @@ import {
   getResponseActionState
 } from "@/lib/lesionResponse";
 import {
-  getOrCreateAssessmentAccessToken,
   isStudySessionNumber,
   STUDY_SESSION_NUMBERS,
+  validateAssessmentAccessCode,
   type StudyMode
 } from "@/lib/sessionConfig";
 import {
   isSupabaseConfigured,
   loadAssessmentSession,
+  loadCurrentVideoSource,
   submitVideoResponse,
-  type VideoSource
+  type VideoQueueItem
 } from "@/lib/supabaseClient";
 import { captureVideoTimeAtClick } from "@/lib/timing";
 
@@ -45,10 +46,12 @@ type CompletedSession = {
 
 export default function AssessmentClient() {
   const [phase, setPhase] = useState<Phase>("intake");
-  const [videoQueue, setVideoQueue] = useState<VideoSource[]>([]);
+  const [videoQueue, setVideoQueue] = useState<VideoQueueItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [signedVideoUrl, setSignedVideoUrl] = useState("");
   const [participantId, setParticipantId] = useState("");
   const [sessionNumber, setSessionNumber] = useState("1");
+  const [accessCode, setAccessCode] = useState("");
   const [intakeError, setIntakeError] = useState("");
   const [videoStarted, setVideoStarted] = useState(false);
   const [videoEnded, setVideoEnded] = useState(false);
@@ -78,7 +81,7 @@ export default function AssessmentClient() {
   const submissionInFlightRef = useRef(false);
   const videoStartedAtRef = useRef<number | null>(null);
   const videoEndedAtRef = useRef<number | null>(null);
-  const accessTokenRef = useRef<string | null>(null);
+  const accessCodeRef = useRef<string | null>(null);
   const normalizedParticipantId = participantId.trim();
   const parsedSessionNumber = Number.parseInt(sessionNumber, 10);
 
@@ -92,35 +95,48 @@ export default function AssessmentClient() {
     }
   }, [configured]);
 
-  const loadQueue = async (accessToken: string) => {
+  const loadQueue = async (accessCode: string) => {
     setPhase("loading");
     setLoadError("");
     setCompletedSession(null);
 
-    try {
-      const session = await loadAssessmentSession(
+    const session = await loadAssessmentSession(
+      normalizedParticipantId,
+      parsedSessionNumber,
+      accessCode
+    );
+    let nextSignedVideoUrl = "";
+
+    if (!session.isComplete) {
+      const nextVideo = session.videoQueue[session.startIndex];
+
+      if (!nextVideo) {
+        throw new Error("Assessment queue did not contain the next video.");
+      }
+
+      const videoSource = await loadCurrentVideoSource(
         normalizedParticipantId,
         parsedSessionNumber,
-        accessToken
+        nextVideo,
+        accessCode
       );
-
-      setVideoQueue(session.videoQueue);
-      setCurrentIndex(session.startIndex);
-      setStudyMode(session.studyMode);
-      setCompletedSession(
-        session.isComplete
-          ? {
-              participantId: normalizedParticipantId,
-              sessionNumber: parsedSessionNumber,
-              totalVideos: session.videoQueue.length
-            }
-          : null
-      );
-      setPhase(session.isComplete ? "complete" : "assessment");
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "Unable to load videos.");
-      setPhase("error");
+      nextSignedVideoUrl = videoSource.signedUrl;
     }
+
+    setVideoQueue(session.videoQueue);
+    setCurrentIndex(session.startIndex);
+    setSignedVideoUrl(nextSignedVideoUrl);
+    setStudyMode(session.studyMode);
+    setCompletedSession(
+      session.isComplete
+        ? {
+            participantId: normalizedParticipantId,
+            sessionNumber: parsedSessionNumber,
+            totalVideos: session.videoQueue.length
+          }
+        : null
+    );
+    setPhase(session.isComplete ? "complete" : "assessment");
   };
 
   const startAssessment = (event: FormEvent<HTMLFormElement>) => {
@@ -142,16 +158,19 @@ export default function AssessmentClient() {
     setIntakeError("");
 
     try {
-      const accessToken = getOrCreateAssessmentAccessToken(
-        normalizedParticipantId,
-        parsedSessionNumber
-      );
-      accessTokenRef.current = accessToken;
-      void loadQueue(accessToken);
-    } catch {
-      accessTokenRef.current = null;
+      const normalizedAccessCode = validateAssessmentAccessCode(accessCode);
+      accessCodeRef.current = normalizedAccessCode;
+      void loadQueue(normalizedAccessCode).catch((error) => {
+        accessCodeRef.current = null;
+        setIntakeError(
+          error instanceof Error ? error.message : "Unable to load videos."
+        );
+        setPhase("intake");
+      });
+    } catch (error) {
+      accessCodeRef.current = null;
       setIntakeError(
-        "Secure browser storage is unavailable. Enable storage access and try again."
+        error instanceof Error ? error.message : "Study access code is invalid."
       );
     }
   };
@@ -232,29 +251,17 @@ export default function AssessmentClient() {
     setSaveError("");
 
     try {
-      const accessToken = accessTokenRef.current;
+      const accessCode = accessCodeRef.current;
 
-      if (!accessToken) {
-        throw new Error("Assessment access token is unavailable. Restart this session from the original browser.");
+      if (!accessCode) {
+        throw new Error("Study access code is unavailable. Return to the start screen.");
       }
 
-      await submitVideoResponse(submission, accessToken);
+      await submitVideoResponse(submission, accessCode);
+      await loadQueue(accessCode);
       setSaveState("saved");
-
-      const nextIndex = currentIndex + 1;
-
-      if (nextIndex >= totalVideos) {
-        setCompletedSession({
-          participantId: submission.participant_id,
-          sessionNumber: submission.session_number,
-          totalVideos
-        });
-        setPhase("complete");
-        return;
-      }
-
-      setCurrentIndex(nextIndex);
     } catch (error) {
+      setPhase("assessment");
       setSaveState("error");
       setSaveError(
         error instanceof Error ? error.message : "Unable to save response."
@@ -325,11 +332,13 @@ export default function AssessmentClient() {
     setPhase("intake");
     setVideoQueue([]);
     setCurrentIndex(0);
+    setSignedVideoUrl("");
     setStudyMode(null);
     setLoadError("");
     setIntakeError("");
     setCompletedSession(null);
-    accessTokenRef.current = null;
+    setAccessCode("");
+    accessCodeRef.current = null;
 
     if (Number.isInteger(nextSessionNumber) && isStudySessionNumber(nextSessionNumber)) {
       setSessionNumber(String(nextSessionNumber));
@@ -395,6 +404,17 @@ export default function AssessmentClient() {
               </select>
             </label>
 
+            <label className="field">
+              <span>Study access code</span>
+              <input
+                autoComplete="off"
+                onChange={(event) => setAccessCode(event.target.value)}
+                placeholder="Coordinator-issued code"
+                type="password"
+                value={accessCode}
+              />
+            </label>
+
             {intakeError && (
               <div className="alert-box critical">
                 <AlertTriangle size={18} aria-hidden="true" />
@@ -436,7 +456,7 @@ export default function AssessmentClient() {
         <section className="complete-panel">
           <div className="spinner" />
           <p className="eyebrow">Loading</p>
-          <h2>Fetching videos and signed URLs from Supabase.</h2>
+          <h2>Authorizing the current video from Supabase.</h2>
         </section>
       )}
 
@@ -448,7 +468,7 @@ export default function AssessmentClient() {
         </section>
       )}
 
-      {phase === "assessment" && currentVideo && (
+      {phase === "assessment" && currentVideo && signedVideoUrl && (
         <section className="workbench">
           <div className="progress-block" aria-label="Video progress">
             <div className="progress-labels">
@@ -477,7 +497,7 @@ export default function AssessmentClient() {
                 onVideoError={() =>
                   setVideoError(`Cannot play signed URL for ${currentVideo.videoId}.`)
                 }
-                signedUrl={currentVideo.signedUrl}
+                signedUrl={signedVideoUrl}
                 videoId={currentVideo.videoId}
               />
               <div className="video-caption">
@@ -489,7 +509,7 @@ export default function AssessmentClient() {
                       ? "Playing"
                       : videoStarted
                         ? "Paused"
-                        : `${currentVideo.bucket}/${currentVideo.filePath}`}
+                        : "Private Supabase Storage"}
                 </span>
               </div>
             </section>

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const assessmentClientSource = readFileSync(
@@ -30,6 +30,17 @@ const envExampleSource = readFileSync(
   new URL("../.env.example", import.meta.url),
   "utf8"
 );
+const edgeFunctionUrl = new URL(
+  "../supabase/functions/issue-assessment-video-url/index.ts",
+  import.meta.url
+);
+const edgeFunctionSource = existsSync(edgeFunctionUrl)
+  ? readFileSync(edgeFunctionUrl, "utf8")
+  : "";
+const supabaseConfigUrl = new URL("../supabase/config.toml", import.meta.url);
+const supabaseConfigSource = existsSync(supabaseConfigUrl)
+  ? readFileSync(supabaseConfigUrl, "utf8")
+  : "";
 const componentAndLibSource = [
   assessmentClientSource,
   lesionSurveySource,
@@ -83,12 +94,14 @@ test("integrates the seek-free player and atomic submission client", () => {
   assert.doesNotMatch(assessmentClientSource, /<video\b/);
 });
 
-test("uses only the server-owned safe queue RPC with a browser-local access token", () => {
+test("uses the safe queue RPC with a coordinator-issued access code", () => {
   assert.match(supabaseClientSource, /start_or_resume_assessment/);
   assert.match(supabaseClientSource, /buildStartOrResumeRpcParams/);
-  assert.match(assessmentClientSource, /getOrCreateAssessmentAccessToken/);
-  assert.match(assessmentClientSource, /loadAssessmentSession\([\s\S]*accessToken/);
-  assert.match(assessmentClientSource, /submitVideoResponse\(submission, accessToken\)/);
+  assert.match(assessmentClientSource, /validateAssessmentAccessCode/);
+  assert.match(assessmentClientSource, /loadAssessmentSession\([\s\S]*accessCode/);
+  assert.match(assessmentClientSource, /submitVideoResponse\(submission, accessCode\)/);
+  assert.match(assessmentClientSource, /type="password"/);
+  assert.match(assessmentClientSource, />Study access code</);
   assert.doesNotMatch(supabaseClientSource, /\.from\(["']videos["']\)/);
   assert.doesNotMatch(supabaseClientSource, /\.from\(["']assessment_queue["']\)/);
   assert.doesNotMatch(componentAndLibSource, /has_lesion|lesion_onset_sec|hasLesion|lesionOnsetSec|detection_latency_ms/);
@@ -96,21 +109,29 @@ test("uses only the server-owned safe queue RPC with a browser-local access toke
   assert.doesNotMatch(supabaseClientSource, staleStudyModePattern);
 });
 
-test("stores a versioned high-entropy access token without logging it", () => {
-  assert.match(sessionConfigSource, /assessment-access:v1:/);
-  assert.match(sessionConfigSource, /crypto\.getRandomValues/);
-  assert.match(sessionConfigSource, /localStorage/);
-  assert.doesNotMatch(supabaseClientSource, /console\.(?:log|warn|error)\([^)]*accessToken/s);
-  assert.doesNotMatch(assessmentClientSource, /console\.(?:log|warn|error)\([^)]*accessToken/s);
+test("keeps the access code in memory without browser persistence or secret logs", () => {
+  assert.doesNotMatch(sessionConfigSource, /localStorage|sessionStorage|getRandomValues/);
+  assert.doesNotMatch(assessmentClientSource, /localStorage|sessionStorage|getRandomValues/);
+  assert.doesNotMatch(componentAndLibSource, /console\.(?:log|warn|error)\([^)]*accessCode/s);
+  assert.doesNotMatch(edgeFunctionSource, /console\.(?:log|warn|error)/);
 });
 
-test("shows an intake error when secure token creation fails synchronously", () => {
+test("validates the coordinator access code before loading a queue", () => {
   const startBody = getFunctionBody(assessmentClientSource, "startAssessment");
 
   assert.match(startBody, /try\s*\{/);
-  assert.match(startBody, /getOrCreateAssessmentAccessToken/);
+  assert.match(startBody, /validateAssessmentAccessCode/);
   assert.match(startBody, /catch(?:\s*\([^)]*\))?\s*\{/);
   assert.match(startBody, /setIntakeError\(/);
+});
+
+test("keeps a rejected access-code start on the intake screen", () => {
+  const startBody = getFunctionBody(assessmentClientSource, "startAssessment");
+
+  assert.match(startBody, /loadQueue\(normalizedAccessCode\)\.catch/);
+  assert.match(startBody, /accessCodeRef\.current = null;/);
+  assert.match(startBody, /setIntakeError\(/);
+  assert.match(startBody, /setPhase\("intake"\);/);
 });
 
 test("removes the obsolete browser study-mode configuration", () => {
@@ -173,14 +194,40 @@ test("captures the no-response timestamp before SurveyJS validation", () => {
   assert.doesNotMatch(finalizeBody, /nowMs: performance\.now\(\)/);
 });
 
-test("uses six-hour private signed URLs without logging their secrets", () => {
-  assert.match(supabaseClientSource, /SIGNED_URL_EXPIRY_SECONDS = 6 \* 60 \* 60/);
-  assert.match(supabaseClientSource, /createSignedUrl\([^,]+, SIGNED_URL_EXPIRY_SECONDS\)/);
-  const signedUrlLog = supabaseClientSource.match(
-    /console\.log\("generated video URL", \{[\s\S]*?\n  \}\);/
-  )?.[0];
-  assert.ok(signedUrlLog, "Expected signed URL generation telemetry.");
-  assert.doesNotMatch(signedUrlLog, /signedUrl/);
+test("signs only the current video through the service-role Edge Function", () => {
+  assert.match(supabaseClientSource, /issue-assessment-video-url/);
+  assert.match(supabaseClientSource, /functions\.invoke/);
+  assert.doesNotMatch(supabaseClientSource, /\.storage\b|createSignedUrl|Promise\.all/);
+  assert.match(edgeFunctionSource, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(edgeFunctionSource, /authorize_current_assessment_video/);
+  assert.match(edgeFunctionSource, /SIGNED_URL_EXPIRY_SECONDS = 6 \* 60 \* 60/);
+  assert.match(edgeFunctionSource, /createSignedUrl/);
+  assert.doesNotMatch(edgeFunctionSource, /\.list\(/);
+  assert.doesNotMatch(edgeFunctionSource, /signed_url[^\n]*console|access_code[^\n]*console/i);
+});
+
+test("uses custom access-code authorization for the publishable-key Edge Function", () => {
+  assert.match(
+    supabaseConfigSource,
+    /\[functions\.issue-assessment-video-url\]\s*verify_jwt\s*=\s*false/s
+  );
+  assert.match(edgeFunctionSource, /accessCode\.length < 20/);
+  assert.match(edgeFunctionSource, /p_access_code: accessCode/);
+});
+
+test("loads the server-authorized next video only after response commit", () => {
+  const submitBody = getFunctionBody(assessmentClientSource, "submitPendingSubmission");
+
+  assertLexicalOrder(submitBody, [
+    "await submitVideoResponse(submission, accessCode);",
+    "await loadQueue(accessCode);"
+  ]);
+});
+
+test("keeps the locked video visible while loading the next signed URL", () => {
+  const loadBody = getFunctionBody(assessmentClientSource, "loadQueue");
+
+  assert.doesNotMatch(loadBody, /setSignedVideoUrl\(""\)/);
 });
 
 test("keeps SurveyJS as validation boundary while rendering custom controls", () => {
