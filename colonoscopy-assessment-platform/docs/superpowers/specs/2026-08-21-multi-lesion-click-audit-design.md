@@ -143,7 +143,7 @@ An index on `(participant_id, session_number, video_id, click_index)` supports a
 
 ## Atomic Submission RPC
 
-Add `public.submit_video_response` and call it through `supabase.rpc(...)`. The function is `SECURITY INVOKER`, uses an explicit empty search path, and runs all inserts in the caller's transaction.
+Add `public.submit_video_response` and call it through `supabase.rpc(...)`. The function is `SECURITY DEFINER`, is owned by the trusted migration role, uses an explicit empty search path with schema-qualified database objects, and runs all inserts atomically in the caller's transaction. This is the controlled write boundary because anonymous callers have no direct privileges on the response or event tables.
 
 The RPC accepts participant/session/video identity, final classification, final elapsed timing, no-response latency, video-completed state, and a JSON array of raw clicks.
 
@@ -165,10 +165,10 @@ The frontend does not send generated IDs or timestamps.
 
 ## Access Control
 
-- Enable RLS on `lesion_detection_events`.
-- Do not create anonymous `SELECT`, `UPDATE`, or `DELETE` policies for `responses` or `lesion_detection_events`.
-- Grant only the table privileges needed by the `SECURITY INVOKER` RPC and enforce inserts through restrictive RLS checks tied to the existing queue row.
-- Revoke RPC execution from `PUBLIC`, then grant it to `anon` only.
+- Enable RLS on `lesion_detection_events` and retain RLS on `responses`.
+- Revoke all table and identity-sequence privileges on `responses` and `lesion_detection_events` from `PUBLIC`, `anon`, and `authenticated`; do not create anonymous insert, select, update, or delete policies for either table.
+- Use only the trusted `SECURITY DEFINER` RPC to validate queue identity and derive server-owned fields before writing either table.
+- Revoke RPC execution from `PUBLIC` and `authenticated`, then grant it to `anon` only.
 - Keep private Supabase Storage and signed URL behavior unchanged.
 - Run Supabase security and performance advisors after applying the migration.
 

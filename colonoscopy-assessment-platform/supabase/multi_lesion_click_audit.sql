@@ -74,89 +74,23 @@ create index if not exists lesion_detection_events_final_analysis_idx
 
 alter table public.lesion_detection_events enable row level security;
 
+-- Only the trusted SECURITY DEFINER RPC may write response or event data.
 revoke all on table public.lesion_detection_events
-  from anon, authenticated;
-grant insert on table public.lesion_detection_events to anon;
-grant usage, select on sequence public.lesion_detection_events_id_seq to anon;
-
-revoke select, update, delete, truncate
-  on table public.responses
-  from anon;
-grant insert on table public.responses to anon;
-grant usage, select on sequence public.responses_id_seq to anon;
+  from public, anon, authenticated;
+revoke all on sequence public.lesion_detection_events_id_seq
+  from public, anon, authenticated;
+revoke all on table public.responses
+  from public, anon, authenticated;
+revoke all on sequence public.responses_id_seq
+  from public, anon, authenticated;
 
 drop policy if exists "Allow anonymous lesion event inserts"
   on public.lesion_detection_events;
 
-create policy "Allow anonymous lesion event inserts"
-  on public.lesion_detection_events
-  for insert
-  to anon
-  with check (
-    length(trim(participant_id)) > 0
-    and session_number between 1 and 3
-    and video_order >= 1
-    and click_index >= 1
-    and video_time_at_click >= 0
-    and response_time_ms >= 0
-    and final_valid <> overridden
-    and exists (
-      select 1
-      from public.assessment_queue q
-      where q.participant_id =
-        lesion_detection_events.participant_id
-        and q.session_number =
-          lesion_detection_events.session_number
-        and q.video_id = lesion_detection_events.video_id
-        and q.video_order = lesion_detection_events.video_order
-    )
-  );
-
 drop policy if exists "Allow anonymous response inserts"
   on public.responses;
 
-create policy "Allow anonymous response inserts"
-  on public.responses
-  for insert
-  to anon
-  with check (
-    length(trim(participant_id)) > 0
-    and session_number between 1 and 3
-    and video_order >= 1
-    and answer is not null
-    and correct is not null
-    and response_time_ms >= 0
-    and video_completed is true
-    and response_type = case
-      when answer then 'lesion_detected'
-      else 'no_lesion_detected'
-    end
-    and (
-      (
-        answer is true
-        and video_time_at_click is not null
-        and video_time_at_click >= 0
-        and no_response_latency_ms is null
-      )
-      or
-      (
-        answer is false
-        and video_time_at_click is null
-        and detection_latency_ms is null
-        and no_response_latency_ms is not null
-        and no_response_latency_ms >= 0
-      )
-    )
-    and exists (
-      select 1
-      from public.assessment_queue q
-      where q.participant_id = responses.participant_id
-        and q.session_number = responses.session_number
-        and q.video_id = responses.video_id
-        and q.video_order = responses.video_order
-    )
-  );
-
+-- The migration owner is the controlled write boundary; callers get EXECUTE only.
 create or replace function public.submit_video_response(
   p_participant_id text,
   p_session_number integer,
@@ -170,7 +104,7 @@ create or replace function public.submit_video_response(
 )
 returns void
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -184,7 +118,7 @@ declare
   first_response_time_ms bigint;
   first_detection_latency_ms bigint;
 begin
-  if length(trim(coalesce(p_participant_id, ''))) = 0 then
+  if pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(p_participant_id, ''))) = 0 then
     raise exception 'participant_id is required';
   end if;
 
@@ -220,7 +154,7 @@ begin
     raise exception 'negative responses require no_response_latency_ms';
   end if;
 
-  if p_clicks is null or jsonb_typeof(p_clicks) <> 'array' then
+  if p_clicks is null or pg_catalog.jsonb_typeof(p_clicks) <> 'array' then
     raise exception 'p_clicks must be a JSON array';
   end if;
 
@@ -242,16 +176,16 @@ begin
   end if;
 
   select
-    count(*)::integer,
-    count(distinct click_row.click_index)::integer,
-    min(click_row.click_index),
-    max(click_row.click_index)
+    pg_catalog.count(*)::integer,
+    pg_catalog.count(distinct click_row.click_index)::integer,
+    pg_catalog.min(click_row.click_index),
+    pg_catalog.max(click_row.click_index)
   into
     click_count,
     distinct_click_count,
     minimum_click_index,
     maximum_click_index
-  from jsonb_to_recordset(p_clicks) as click_row(
+  from pg_catalog.jsonb_to_recordset(p_clicks) as click_row(
     click_index integer,
     video_time_at_click double precision,
     response_time_ms bigint
@@ -271,7 +205,7 @@ begin
 
   if exists (
     select 1
-    from jsonb_to_recordset(p_clicks) as click_row(
+    from pg_catalog.jsonb_to_recordset(p_clicks) as click_row(
       click_index integer,
       video_time_at_click double precision,
       response_time_ms bigint
@@ -287,13 +221,13 @@ begin
 
   if p_answer is true then
     select
-      round(click_row.video_time_at_click::numeric, 3)::double precision,
+      pg_catalog.round(click_row.video_time_at_click::numeric, 3)::double precision,
       click_row.response_time_ms,
       case
         when video_lesion_onset_sec is null then null
-        else round(
+        else pg_catalog.round(
           (
-            round(click_row.video_time_at_click::numeric, 3)::double precision
+            pg_catalog.round(click_row.video_time_at_click::numeric, 3)::double precision
             - video_lesion_onset_sec
           ) * 1000
         )::bigint
@@ -302,7 +236,7 @@ begin
       first_video_time,
       first_response_time_ms,
       first_detection_latency_ms
-    from jsonb_to_recordset(p_clicks) as click_row(
+    from pg_catalog.jsonb_to_recordset(p_clicks) as click_row(
       click_index integer,
       video_time_at_click double precision,
       response_time_ms bigint
@@ -330,21 +264,21 @@ begin
     p_video_id,
     p_video_order,
     click_row.click_index,
-    round(click_row.video_time_at_click::numeric, 3)::double precision,
+    pg_catalog.round(click_row.video_time_at_click::numeric, 3)::double precision,
     click_row.response_time_ms,
     video_lesion_onset_sec,
     case
       when video_lesion_onset_sec is null then null
-      else round(
+      else pg_catalog.round(
         (
-          round(click_row.video_time_at_click::numeric, 3)::double precision
+          pg_catalog.round(click_row.video_time_at_click::numeric, 3)::double precision
           - video_lesion_onset_sec
         ) * 1000
       )::bigint
     end,
     not p_answer,
     p_answer
-  from jsonb_to_recordset(p_clicks) as click_row(
+  from pg_catalog.jsonb_to_recordset(p_clicks) as click_row(
     click_index integer,
     video_time_at_click double precision,
     response_time_ms bigint
@@ -399,6 +333,18 @@ revoke all on function public.submit_video_response(
   jsonb
 ) from public;
 
+revoke all on function public.submit_video_response(
+  text,
+  integer,
+  text,
+  integer,
+  boolean,
+  bigint,
+  bigint,
+  boolean,
+  jsonb
+) from authenticated;
+
 grant execute on function public.submit_video_response(
   text,
   integer,
@@ -410,3 +356,15 @@ grant execute on function public.submit_video_response(
   boolean,
   jsonb
 ) to anon;
+
+comment on function public.submit_video_response(
+  text,
+  integer,
+  text,
+  integer,
+  boolean,
+  bigint,
+  bigint,
+  boolean,
+  jsonb
+) is 'SECURITY DEFINER is intentional: response and event tables revoke direct public, anon, and authenticated writes so this validated RPC is the only write boundary.';

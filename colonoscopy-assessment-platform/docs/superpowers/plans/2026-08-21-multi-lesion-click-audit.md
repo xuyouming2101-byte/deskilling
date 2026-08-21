@@ -4,7 +4,7 @@
 
 **Goal:** Require full video playback, collect repeated lesion clicks, and atomically save one mutually exclusive final response plus auditable raw click events.
 
-**Architecture:** Pure TypeScript functions define timing, click accumulation, action availability, and final submission semantics. React components provide a seek-free player and task-specific controls. A Supabase SECURITY INVOKER RPC validates and inserts the final response and raw events in one PostgreSQL transaction.
+**Architecture:** Pure TypeScript functions define timing, click accumulation, action availability, and final submission semantics. React components provide a seek-free player and task-specific controls. A trusted Supabase SECURITY DEFINER RPC validates and inserts the final response and raw events in one PostgreSQL transaction; direct response and event writes are revoked.
 
 **Tech Stack:** Next.js 16.3, React 19, TypeScript 5.8, SurveyJS Form Library 2.5, Supabase JS 2.55, PostgreSQL 17, Node.js 22 built-in test runner.
 
@@ -440,10 +440,10 @@ Create supabase/multi_lesion_click_audit.sql. It must:
 2. Add a unique index on videos.video_id after asserting there are no duplicates.
 3. Create lesion_detection_events with identity id, queue identity columns, click timing, onset snapshot, signed latency, overridden, final_valid, created_at, and the constraints from the design spec.
 4. Enable RLS.
-5. Grant anon INSERT and identity-sequence usage only; do not grant SELECT, UPDATE, or DELETE.
-6. Replace the anonymous responses INSERT policy so new submissions require a matching assessment_queue row, video_completed = true, mutually consistent answer fields, and correct no_response_latency_ms nullability.
-7. Create the SECURITY INVOKER submit_video_response function with search_path = ''.
-8. Revoke function execution from PUBLIC and grant it to anon.
+5. Revoke all direct table and identity-sequence privileges from PUBLIC, anon, and authenticated; do not create response or event policies for anon.
+6. Drop the old anonymous response and event insert policies while retaining RLS on both tables.
+7. Create the trusted SECURITY DEFINER submit_video_response function with search_path = '' and schema-qualified database objects.
+8. Revoke function execution from PUBLIC and authenticated, then grant it to anon only.
 
 Use this exact migration:
 
@@ -525,87 +525,19 @@ create index if not exists lesion_detection_events_final_analysis_idx
 alter table public.lesion_detection_events enable row level security;
 
 revoke all on table public.lesion_detection_events
-  from anon, authenticated;
-grant insert on table public.lesion_detection_events to anon;
-grant usage, select on sequence public.lesion_detection_events_id_seq to anon;
-
-revoke select, update, delete, truncate
-  on table public.responses
-  from anon;
-grant insert on table public.responses to anon;
-grant usage, select on sequence public.responses_id_seq to anon;
+  from public, anon, authenticated;
+revoke all on sequence public.lesion_detection_events_id_seq
+  from public, anon, authenticated;
+revoke all on table public.responses
+  from public, anon, authenticated;
+revoke all on sequence public.responses_id_seq
+  from public, anon, authenticated;
 
 drop policy if exists "Allow anonymous lesion event inserts"
   on public.lesion_detection_events;
 
-create policy "Allow anonymous lesion event inserts"
-  on public.lesion_detection_events
-  for insert
-  to anon
-  with check (
-    length(trim(participant_id)) > 0
-    and session_number between 1 and 3
-    and video_order >= 1
-    and click_index >= 1
-    and video_time_at_click >= 0
-    and response_time_ms >= 0
-    and final_valid <> overridden
-    and exists (
-      select 1
-      from public.assessment_queue q
-      where q.participant_id =
-        lesion_detection_events.participant_id
-        and q.session_number =
-          lesion_detection_events.session_number
-        and q.video_id = lesion_detection_events.video_id
-        and q.video_order = lesion_detection_events.video_order
-    )
-  );
-
 drop policy if exists "Allow anonymous response inserts"
   on public.responses;
-
-create policy "Allow anonymous response inserts"
-  on public.responses
-  for insert
-  to anon
-  with check (
-    length(trim(participant_id)) > 0
-    and session_number between 1 and 3
-    and video_order >= 1
-    and answer is not null
-    and correct is not null
-    and response_time_ms >= 0
-    and video_completed is true
-    and response_type = case
-      when answer then 'lesion_detected'
-      else 'no_lesion_detected'
-    end
-    and (
-      (
-        answer is true
-        and video_time_at_click is not null
-        and video_time_at_click >= 0
-        and no_response_latency_ms is null
-      )
-      or
-      (
-        answer is false
-        and video_time_at_click is null
-        and detection_latency_ms is null
-        and no_response_latency_ms is not null
-        and no_response_latency_ms >= 0
-      )
-    )
-    and exists (
-      select 1
-      from public.assessment_queue q
-      where q.participant_id = responses.participant_id
-        and q.session_number = responses.session_number
-        and q.video_id = responses.video_id
-        and q.video_order = responses.video_order
-    )
-  );
 
 create or replace function public.submit_video_response(
   p_participant_id text,
@@ -620,7 +552,7 @@ create or replace function public.submit_video_response(
 )
 returns void
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -849,6 +781,18 @@ revoke all on function public.submit_video_response(
   jsonb
 ) from public;
 
+revoke all on function public.submit_video_response(
+  text,
+  integer,
+  text,
+  integer,
+  boolean,
+  bigint,
+  bigint,
+  boolean,
+  jsonb
+) from authenticated;
+
 grant execute on function public.submit_video_response(
   text,
   integer,
@@ -899,11 +843,21 @@ name: multi_lesion_click_audit
 query: exact contents of supabase/multi_lesion_click_audit.sql
 ~~~
 
-Expected: migration succeeds once without changing the existing response count.
+Expected: migration succeeds once without changing the immediately captured response snapshot. Do not hard-code a permanent response count.
 
 - [ ] **Step 5: Verify schema, transaction behavior, and access control**
 
-First verify the existing row count remains 47. Then run a transaction-backed test using a reserved participant ID:
+Capture the response count and maximum response id immediately before applying the migration, then compare that snapshot immediately after application. Verify direct anonymous access before the transaction test:
+
+~~~sql
+select
+  has_table_privilege('anon', 'public.responses', 'INSERT') as responses_insert,
+  has_table_privilege('anon', 'public.responses', 'SELECT') as responses_select,
+  has_table_privilege('anon', 'public.lesion_detection_events', 'INSERT') as events_insert,
+  has_table_privilege('anon', 'public.lesion_detection_events', 'SELECT') as events_select;
+~~~
+
+Expected: all four values are false. Then run a transaction-backed RPC test using a reserved participant ID:
 
 ~~~sql
 begin;
@@ -979,7 +933,9 @@ Expected:
 - Negative response uses answer = false, null detection fields, and no_response_latency_ms = 1125.
 - Positive events are final_valid; negative event is overridden.
 - Rollback leaves no test rows.
-- has_table_privilege('anon', 'public.responses', 'SELECT') and the equivalent event-table check are false.
+- Anonymous direct INSERT and SELECT privileges are false for both tables; a REST insert attempt must be rejected.
+- The anon RPC calls succeed despite the direct-table revocations.
+- After the positive RPC, retry the same response inside a savepoint with a new click index. It must fail with the response unique constraint; roll back to that savepoint and verify the event count for that video remains two, proving the attempted event insert rolled back with the failed response.
 
 Run Supabase security and performance advisors and resolve any finding caused by this migration.
 

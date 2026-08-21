@@ -9,7 +9,7 @@ Minimal Next.js assessment loop:
 5. Call `get_next_video_order(participant_id, session_number)` and resume at that persisted `video_order`.
 6. Create a signed URL for each private Supabase Storage object using its `bucket` and `file_path`.
 7. Show `Video X / queue length`, play the current video, and ask `Yes` or `No` with SurveyJS Form Library.
-8. Submit the final classification and all raw lesion clicks through the atomic `submit_video_response` RPC.
+8. Task 3 will submit the final classification and raw lesion clicks through the atomic `submit_video_response` RPC.
 9. Automatically advance to the next video, then show a completion page after every queued video has a saved response.
 
 Survey Creator and admin drag-and-drop editing are not included.
@@ -87,10 +87,11 @@ this MVP only validates the technical multi-session workflow.
 
 ## Atomic response and click audit data
 
+Task 2 defines the database boundary; Task 3 moves the browser client to it.
 PostgreSQL generates all `id` and `created_at` values. The browser never sends
 them. A completed video is submitted through
 `public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb)`.
-The `SECURITY INVOKER` RPC validates the matching `assessment_queue` row,
+The `SECURITY DEFINER` RPC is owned by the trusted migration role and validates the matching `assessment_queue` row,
 completion state, timing values, and contiguous click indexes, then inserts raw
 events before the final response. Any validation or unique-response error rolls
 back both inserts.
@@ -114,9 +115,15 @@ submitted event `final_valid = true` and `overridden = false`. A final `false`
 retains submitted clicks for audit but marks them `final_valid = false` and
 `overridden = true`; a no-click negative response has no event rows.
 
-Anonymous clients receive only the privileges required to call the RPC and
-insert through its RLS checks. They have no `SELECT`, `UPDATE`, or `DELETE`
-access to either `responses` or `lesion_detection_events`.
+Anonymous clients receive `EXECUTE` on the RPC only. Direct table and identity
+sequence privileges are revoked from `PUBLIC`, `anon`, and `authenticated`, so
+the function is the sole boundary that can derive `correct`, timing, onset, and
+finalization fields. They have no direct `INSERT`, `SELECT`, `UPDATE`, or
+`DELETE` access to either `responses` or `lesion_detection_events`.
+
+The current browser client still has the pre-Task 3 direct-insert implementation.
+It is intentionally not compatible with this Task 2 database hardening until
+Task 3 switches it to `submit_video_response`.
 
 The participant workflow permits repeated lesion clicks only after playback
 starts. Final classification is available only after the actual HTML5 `ended`
