@@ -22,12 +22,12 @@ import {
   getResponseActionState
 } from "@/lib/lesionResponse";
 import {
+  getOrCreateAssessmentAccessToken,
   isStudySessionNumber,
   STUDY_SESSION_NUMBERS,
   type StudyMode
 } from "@/lib/sessionConfig";
 import {
-  getOrCreateAssessmentAccessToken,
   isSupabaseConfigured,
   loadAssessmentSession,
   submitVideoResponse,
@@ -140,12 +140,20 @@ export default function AssessmentClient() {
     }
 
     setIntakeError("");
-    const accessToken = getOrCreateAssessmentAccessToken(
-      normalizedParticipantId,
-      parsedSessionNumber
-    );
-    accessTokenRef.current = accessToken;
-    void loadQueue(accessToken);
+
+    try {
+      const accessToken = getOrCreateAssessmentAccessToken(
+        normalizedParticipantId,
+        parsedSessionNumber
+      );
+      accessTokenRef.current = accessToken;
+      void loadQueue(accessToken);
+    } catch {
+      accessTokenRef.current = null;
+      setIntakeError(
+        "Secure browser storage is unavailable. Enable storage access and try again."
+      );
+    }
   };
 
   useEffect(() => {

@@ -218,3 +218,32 @@ test("maps a final submission and access token to the exact RPC parameter contra
     ]
   });
 });
+
+test("maps an identical submission and token to identical retry parameters", () => {
+  const submission = buildVideoSubmission({
+    ...identity,
+    finalClassification: "no",
+    clicks: [],
+    nowMs: 9_125,
+    playbackStartedAtMs: 1_000,
+    videoEndedAtMs: 8_000
+  });
+  const accessToken = "one-fixed-browser-token-for-every-retry";
+
+  const firstAttempt = buildSubmissionRpcParams(submission, accessToken);
+  const retryAttempt = buildSubmissionRpcParams(submission, accessToken);
+
+  assert.deepEqual(retryAttempt, firstAttempt);
+  assert.deepEqual(retryAttempt, {
+    p_participant_id: "P001",
+    p_session_number: 1,
+    p_video_id: "video_001",
+    p_video_order: 1,
+    p_answer: false,
+    p_response_time_ms: 8_125,
+    p_no_response_latency_ms: 1_125,
+    p_video_completed: true,
+    p_access_token: "one-fixed-browser-token-for-every-retry",
+    p_clicks: []
+  });
+});

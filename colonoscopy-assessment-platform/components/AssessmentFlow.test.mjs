@@ -22,11 +22,20 @@ const globalStylesSource = readFileSync(
   new URL("../app/globals.css", import.meta.url),
   "utf8"
 );
+const sessionConfigSource = readFileSync(
+  new URL("../lib/sessionConfig.ts", import.meta.url),
+  "utf8"
+);
+const envExampleSource = readFileSync(
+  new URL("../.env.example", import.meta.url),
+  "utf8"
+);
 const componentAndLibSource = [
   assessmentClientSource,
   lesionSurveySource,
   assessmentTypesSource,
-  supabaseClientSource
+  supabaseClientSource,
+  sessionConfigSource
 ].join("\n");
 const staleSymbols = [
   ["insert", "Response"].join(""),
@@ -36,6 +45,12 @@ const staleSymbols = [
   ["response", "LockedRef"].join(""),
   ["submitted", "Ref"].join("")
 ];
+const staleStudyModePattern = new RegExp(
+  [
+    ["get", "StudyMode"].join(""),
+    ["NEXT_PUBLIC", "_STUDY_MODE"].join("")
+  ].join("|")
+);
 
 function getFunctionBody(source, name) {
   const match = source.match(
@@ -70,23 +85,38 @@ test("integrates the seek-free player and atomic submission client", () => {
 
 test("uses only the server-owned safe queue RPC with a browser-local access token", () => {
   assert.match(supabaseClientSource, /start_or_resume_assessment/);
-  assert.match(supabaseClientSource, /p_access_token:\s*accessToken/);
+  assert.match(supabaseClientSource, /buildStartOrResumeRpcParams/);
   assert.match(assessmentClientSource, /getOrCreateAssessmentAccessToken/);
   assert.match(assessmentClientSource, /loadAssessmentSession\([\s\S]*accessToken/);
   assert.match(assessmentClientSource, /submitVideoResponse\(submission, accessToken\)/);
   assert.doesNotMatch(supabaseClientSource, /\.from\(["']videos["']\)/);
   assert.doesNotMatch(supabaseClientSource, /\.from\(["']assessment_queue["']\)/);
   assert.doesNotMatch(componentAndLibSource, /has_lesion|lesion_onset_sec|hasLesion|lesionOnsetSec|detection_latency_ms/);
-  assert.doesNotMatch(supabaseClientSource, /p_study_mode|NEXT_PUBLIC_STUDY_MODE|getStudyMode/);
+  assert.doesNotMatch(supabaseClientSource, /p_study_mode/);
+  assert.doesNotMatch(supabaseClientSource, staleStudyModePattern);
 });
 
 test("stores a versioned high-entropy access token without logging it", () => {
-  assert.match(supabaseClientSource, /assessment-access:v1:/);
-  assert.match(supabaseClientSource, /crypto\.getRandomValues/);
-  assert.match(supabaseClientSource, /localStorage\.setItem/);
-  assert.match(supabaseClientSource, /localStorage\.getItem/);
+  assert.match(sessionConfigSource, /assessment-access:v1:/);
+  assert.match(sessionConfigSource, /crypto\.getRandomValues/);
+  assert.match(sessionConfigSource, /localStorage/);
   assert.doesNotMatch(supabaseClientSource, /console\.(?:log|warn|error)\([^)]*accessToken/s);
   assert.doesNotMatch(assessmentClientSource, /console\.(?:log|warn|error)\([^)]*accessToken/s);
+});
+
+test("shows an intake error when secure token creation fails synchronously", () => {
+  const startBody = getFunctionBody(assessmentClientSource, "startAssessment");
+
+  assert.match(startBody, /try\s*\{/);
+  assert.match(startBody, /getOrCreateAssessmentAccessToken/);
+  assert.match(startBody, /catch(?:\s*\([^)]*\))?\s*\{/);
+  assert.match(startBody, /setIntakeError\(/);
+});
+
+test("removes the obsolete browser study-mode configuration", () => {
+  assert.doesNotMatch(sessionConfigSource, staleStudyModePattern);
+  assert.doesNotMatch(envExampleSource, staleStudyModePattern);
+  assert.doesNotMatch(componentAndLibSource, staleStudyModePattern);
 });
 
 test("captures ended time and repeated click indexes through refs before state", () => {

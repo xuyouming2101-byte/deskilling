@@ -1,13 +1,14 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { VideoSubmission } from "@/lib/assessmentTypes";
 import { buildSubmissionRpcParams } from "@/lib/lesionResponse";
-import type { StudyMode } from "@/lib/sessionConfig";
+import {
+  buildStartOrResumeRpcParams,
+  type StudyMode
+} from "@/lib/sessionConfig";
 
 const START_OR_RESUME_FUNCTION = "start_or_resume_assessment";
 const SUBMIT_RESPONSE_FUNCTION = "submit_video_response";
 const SIGNED_URL_EXPIRY_SECONDS = 6 * 60 * 60;
-const ACCESS_TOKEN_KEY_PREFIX = "assessment-access:v1:";
-const ACCESS_TOKEN_MIN_LENGTH = 32;
 
 let client: SupabaseClient | null = null;
 
@@ -81,36 +82,6 @@ function parseStudyMode(value: string): StudyMode {
   }
 
   throw new Error("Assessment RPC returned an invalid study mode.");
-}
-
-function getAccessTokenStorageKey(participantId: string, sessionNumber: number) {
-  return `${ACCESS_TOKEN_KEY_PREFIX}${encodeURIComponent(participantId)}:${sessionNumber}`;
-}
-
-function createAccessToken() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
-}
-
-export function getOrCreateAssessmentAccessToken(
-  participantId: string,
-  sessionNumber: number
-) {
-  if (typeof window === "undefined") {
-    throw new Error("Assessment access tokens can only be created in the browser.");
-  }
-
-  const storageKey = getAccessTokenStorageKey(participantId, sessionNumber);
-  const existingToken = window.localStorage.getItem(storageKey);
-
-  if (existingToken && existingToken.length >= ACCESS_TOKEN_MIN_LENGTH) {
-    return existingToken;
-  }
-
-  const accessToken = createAccessToken();
-  window.localStorage.setItem(storageKey, accessToken);
-  return accessToken;
 }
 
 function parseSafeQueueRows(rows: SafeQueueRow[]) {
@@ -203,11 +174,10 @@ export async function loadAssessmentSession(
     );
   }
 
-  const { data, error } = await supabase.rpc(START_OR_RESUME_FUNCTION, {
-    p_participant_id: participantId,
-    p_session_number: sessionNumber,
-    p_access_token: accessToken
-  });
+  const { data, error } = await supabase.rpc(
+    START_OR_RESUME_FUNCTION,
+    buildStartOrResumeRpcParams(participantId, sessionNumber, accessToken)
+  );
 
   if (error) {
     throw new Error(error.message);
