@@ -22,11 +22,12 @@ import {
   getResponseActionState
 } from "@/lib/lesionResponse";
 import {
-  getStudyMode,
   isStudySessionNumber,
-  STUDY_SESSION_NUMBERS
+  STUDY_SESSION_NUMBERS,
+  type StudyMode
 } from "@/lib/sessionConfig";
 import {
+  getOrCreateAssessmentAccessToken,
   isSupabaseConfigured,
   loadAssessmentSession,
   submitVideoResponse,
@@ -66,9 +67,9 @@ export default function AssessmentClient() {
   const [finalizationLocked, setFinalizationLocked] = useState(false);
   const [completedSession, setCompletedSession] =
     useState<CompletedSession | null>(null);
+  const [studyMode, setStudyMode] = useState<StudyMode | null>(null);
 
   const configured = isSupabaseConfigured();
-  const studyMode = getStudyMode();
   const currentVideo = videoQueue[currentIndex] ?? null;
   const totalVideos = videoQueue.length;
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -77,6 +78,7 @@ export default function AssessmentClient() {
   const submissionInFlightRef = useRef(false);
   const videoStartedAtRef = useRef<number | null>(null);
   const videoEndedAtRef = useRef<number | null>(null);
+  const accessTokenRef = useRef<string | null>(null);
   const normalizedParticipantId = participantId.trim();
   const parsedSessionNumber = Number.parseInt(sessionNumber, 10);
 
@@ -90,7 +92,7 @@ export default function AssessmentClient() {
     }
   }, [configured]);
 
-  const loadQueue = async () => {
+  const loadQueue = async (accessToken: string) => {
     setPhase("loading");
     setLoadError("");
     setCompletedSession(null);
@@ -98,11 +100,13 @@ export default function AssessmentClient() {
     try {
       const session = await loadAssessmentSession(
         normalizedParticipantId,
-        parsedSessionNumber
+        parsedSessionNumber,
+        accessToken
       );
 
       setVideoQueue(session.videoQueue);
       setCurrentIndex(session.startIndex);
+      setStudyMode(session.studyMode);
       setCompletedSession(
         session.isComplete
           ? {
@@ -136,7 +140,12 @@ export default function AssessmentClient() {
     }
 
     setIntakeError("");
-    void loadQueue();
+    const accessToken = getOrCreateAssessmentAccessToken(
+      normalizedParticipantId,
+      parsedSessionNumber
+    );
+    accessTokenRef.current = accessToken;
+    void loadQueue(accessToken);
   };
 
   useEffect(() => {
@@ -194,8 +203,7 @@ export default function AssessmentClient() {
       clickIndex: detectionClicksRef.current.length + 1,
       videoTimeSec,
       nowMs,
-      playbackStartedAtMs,
-      lesionOnsetSec: currentVideo.lesionOnsetSec
+      playbackStartedAtMs
     });
     const nextClicks = [...detectionClicksRef.current, click];
     detectionClicksRef.current = nextClicks;
@@ -216,7 +224,13 @@ export default function AssessmentClient() {
     setSaveError("");
 
     try {
-      await submitVideoResponse(submission);
+      const accessToken = accessTokenRef.current;
+
+      if (!accessToken) {
+        throw new Error("Assessment access token is unavailable. Restart this session from the original browser.");
+      }
+
+      await submitVideoResponse(submission, accessToken);
       setSaveState("saved");
 
       const nextIndex = currentIndex + 1;
@@ -242,7 +256,10 @@ export default function AssessmentClient() {
     }
   };
 
-  const finalizeVideo = (finalClassification: LesionAnswer) => {
+  const finalizeVideo = (
+    finalClassification: LesionAnswer,
+    finalizedAtMs: number
+  ) => {
     const playbackStartedAtMs = videoStartedAtRef.current;
     const videoEndedAtMs = videoEndedAtRef.current;
 
@@ -264,7 +281,7 @@ export default function AssessmentClient() {
         video_order: currentVideo.videoOrder,
         finalClassification,
         clicks: detectionClicksRef.current,
-        nowMs: performance.now(),
+        nowMs: finalizedAtMs,
         playbackStartedAtMs,
         videoEndedAtMs
       }
@@ -300,9 +317,11 @@ export default function AssessmentClient() {
     setPhase("intake");
     setVideoQueue([]);
     setCurrentIndex(0);
+    setStudyMode(null);
     setLoadError("");
     setIntakeError("");
     setCompletedSession(null);
+    accessTokenRef.current = null;
 
     if (Number.isInteger(nextSessionNumber) && isStudySessionNumber(nextSessionNumber)) {
       setSessionNumber(String(nextSessionNumber));
@@ -387,7 +406,7 @@ export default function AssessmentClient() {
             </div>
             <div className="metric-row">
               <span>Mode</span>
-              <strong>{studyMode.toUpperCase()}</strong>
+              <strong>{studyMode?.toUpperCase() ?? "SERVER CONTROLLED"}</strong>
             </div>
             <div className="metric-row">
               <span>Source</span>
@@ -513,8 +532,8 @@ export default function AssessmentClient() {
                 canGoNext={actionState.canGoNext}
                 locked={finalizationLocked}
                 onDetect={handleDetect}
-                onFinalizeNo={() => finalizeVideo("no")}
-                onFinalizeYes={() => finalizeVideo("yes")}
+                onFinalizeNo={(noClickedAtMs) => finalizeVideo("no", noClickedAtMs)}
+                onFinalizeYes={() => finalizeVideo("yes", performance.now())}
               />
 
               <div className="submission-status" aria-live="polite">

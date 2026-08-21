@@ -18,7 +18,7 @@ type LesionSurveyProps = {
   locked: boolean;
   onDetect: () => void;
   onFinalizeYes: () => void;
-  onFinalizeNo: () => void;
+  onFinalizeNo: (clickedAtMs: number) => void;
 };
 
 function formatVideoTime(seconds: number) {
@@ -83,12 +83,14 @@ export default function LesionSurvey({
   };
 
   const handleFinalizeNo = () => {
+    const noClickedAtMs = performance.now();
+
     if (
       canReportNoLesion &&
       !locked &&
       validateFinalClassification("no")
     ) {
-      onFinalizeNo();
+      onFinalizeNo(noClickedAtMs);
     }
   };
 

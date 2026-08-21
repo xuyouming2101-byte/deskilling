@@ -51,6 +51,7 @@ test("keeps the player seek-free and bound to real media events", () => {
   assert.doesNotMatch(source, /\bfastSeek\s*\(/);
   assert.doesNotMatch(source, /<input\b[^>]*\btype\s*=\s*["']range["']/);
   assert.doesNotMatch(source, /\breplay\b/i);
+  assert.doesNotMatch(source, /fullscreen|requestFullscreen|Maximize2/i);
   assert.match(source, /\bforwardRef\s*</);
   assert.match(videoTag, /onPlay=\{handlePlay\}/);
   assert.match(videoTag, /onEnded=\{handleEnded\}/);

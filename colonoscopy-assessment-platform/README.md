@@ -3,15 +3,13 @@
 Minimal Next.js assessment loop:
 
 1. Collect `participant_id` and `session_number` (`1`, `2`, or `3`).
-2. Query `assessment_queue` for that participant/session.
-3. Reuse the stored `video_order` when queue rows already exist.
-4. If no queue exists, resolve that session's video pool from the current study mode, shuffle it once, and persist one `assessment_queue` row per video.
-5. Call `get_next_video_order(participant_id, session_number)` and resume at that persisted `video_order`.
-6. Create a signed URL for each private Supabase Storage object using its `bucket` and `file_path`.
+2. Create or reuse a browser-local access token for that participant/session; only its SHA-256 digest is stored in PostgreSQL.
+3. Call the token-bound `start_or_resume_assessment(participant_id, session_number, access_token)` RPC. PostgreSQL owns pool selection, randomization, queue persistence, and resume order.
+4. Create a six-hour temporary signed URL for each private Supabase Storage object returned by that RPC.
 7. Show `Video X / queue length` and play the current video with task-specific, seek-free controls.
 8. After playback starts, let the participant use `Lesion detected` repeatedly; each click separately records millisecond-precision media time and playback-start elapsed time.
 9. After the actual HTML5 `ended` event, finalize exactly one response: `Next video` submits `yes` when at least one click exists, while `No lesion detected` submits `no` and overrides any prior clicks.
-10. Submit the final classification and raw click audit atomically through `submit_video_response`, then advance only after a successful response.
+10. Submit the final classification and raw click audit atomically through the token-bound `submit_video_response` RPC, then advance only after a successful response.
 11. Show a completion page after every queued video has a saved response.
 
 Survey Creator and admin drag-and-drop editing are not included.
@@ -34,7 +32,6 @@ this MVP only validates the technical multi-session workflow.
    ```bash
    NEXT_PUBLIC_SUPABASE_URL=...
    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-   NEXT_PUBLIC_STUDY_MODE=dev
    SUPABASE_SERVICE_ROLE_KEY=...
    ```
 
@@ -51,12 +48,14 @@ this MVP only validates the technical multi-session workflow.
    session_pool: null for test videos; 1, 2, or 3 for formal videos
    ```
 
-   `NEXT_PUBLIC_STUDY_MODE=dev` is the current mode. It selects `videos` rows
-   where `is_test = true`. Session 1, Session 2, and Session 3 may reuse the
+   The protected `assessment_runtime_config` table controls the current study
+   mode. It defaults to `dev`, which selects `videos` rows where
+   `is_test = true`. Session 1, Session 2, and Session 3 may reuse the
    same current test pool, but each participant/session still creates its own
    independent randomized `assessment_queue`.
 
-   `NEXT_PUBLIC_STUDY_MODE=formal` selects only formal videos:
+   When protected runtime configuration is set to `formal`, it selects only
+   formal videos:
 
    ```text
    Session 1: is_test = false and session_pool = 1
@@ -91,7 +90,7 @@ this MVP only validates the technical multi-session workflow.
 
 PostgreSQL generates all `id` and `created_at` values. The browser never sends
 them. A completed video is submitted through
-`public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb)`.
+`public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb, text)`.
 The `SECURITY DEFINER` RPC is owned by the trusted migration role, has an empty
 search path, and validates the matching `assessment_queue` row, completion
 state, timing values, and contiguous click indexes. It inserts raw events before
@@ -123,7 +122,9 @@ Anonymous clients receive `EXECUTE` on the RPC only. Direct table and identity
 sequence privileges are revoked from `PUBLIC`, `anon`, and `authenticated`, so
 the function is the sole boundary that can derive `correct`, timing, onset, and
 finalization fields. They have no direct `INSERT`, `SELECT`, `UPDATE`, or
-`DELETE` access to either `responses` or `lesion_detection_events`.
+`DELETE` access to `responses`, `lesion_detection_events`, `assessment_queue`,
+or `videos`. The browser receives only safe playback metadata from the
+start/resume RPC, never `has_lesion` or `lesion_onset_sec`.
 
 The participant workflow permits repeated lesion clicks only after playback
 starts, including while playback is paused. Final controls are unavailable until
@@ -138,8 +139,9 @@ positive retry retains all final-valid clicks. A failed overridden-negative retr
 retains its raw overridden clicks even though the visible click count remains
 cleared. The queue advances only after the RPC succeeds.
 
-Refreshing or reopening the same `participant_id` + `session_number` resumes
-from the first persisted queue item returned by the `get_next_video_order` RPC.
+Refreshing or reopening the same browser with the same `participant_id` +
+`session_number` reuses its stored access token and resumes from the first
+persisted unanswered queue item returned by the start/resume RPC.
 If all queued videos already have responses, the completion page is shown
 immediately. A completed `participant_id` + `session_number` is terminal and
 cannot be restarted; the same participant can still start a different session
@@ -149,15 +151,15 @@ Each `participant_id` + `session_number` combination has its own persisted
 `assessment_queue`, progress state, responses, and completion state. Session 1,
 Session 2, and Session 3 do not share queue rows or response rows.
 
-Video IDs are not hard-coded in the frontend. Pool selection is resolved in the
-data layer from `videos.is_test`, `videos.session_pool`, and
-`NEXT_PUBLIC_STUDY_MODE`.
+Video IDs are not hard-coded in the frontend. Pool selection is resolved in
+PostgreSQL from `videos.is_test`, `videos.session_pool`, and protected runtime
+configuration.
 
-The anonymous browser client does not read `public.responses` or
-`public.lesion_detection_events`. Resume recovery is handled by the database-side
-`get_next_video_order` function, so queue and session behavior remain unchanged
-without granting anonymous users direct response or event-table access.
+The anonymous browser client does not read `public.responses`,
+`public.lesion_detection_events`, `public.assessment_queue`, or `public.videos`.
+Resume recovery is handled by the database-side start/resume function, without
+granting anonymous users direct table access.
 
 The app never uses a local `/videos/...` path. Video URLs are generated at
-runtime by querying `videos`, then calling Supabase Storage `createSignedUrl`
-on each row's `bucket/file_path`.
+runtime from the safe RPC metadata, then Supabase Storage `createSignedUrl`
+creates temporary six-hour URLs for each returned `bucket/file_path`.

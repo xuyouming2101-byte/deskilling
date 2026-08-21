@@ -9,7 +9,6 @@ type ClickArgs = {
   videoTimeSec: number;
   nowMs: number;
   playbackStartedAtMs: number;
-  lesionOnsetSec: number | null;
 };
 
 type ActionStateArgs = {
@@ -45,11 +44,7 @@ export function createLesionDetectionClick(
     response_time_ms: Math.max(
       0,
       Math.round(args.nowMs - args.playbackStartedAtMs)
-    ),
-    detection_latency_ms:
-      args.lesionOnsetSec === null
-        ? null
-        : Math.round((videoTimeAtClick - args.lesionOnsetSec) * 1000)
+    )
   };
 }
 
@@ -96,12 +91,6 @@ export function buildVideoSubmission(
     response_time_ms: isPositive
       ? firstClick!.response_time_ms
       : Math.max(0, Math.round(args.nowMs - args.playbackStartedAtMs)),
-    summary_video_time_at_click: isPositive
-      ? firstClick!.video_time_at_click
-      : null,
-    summary_detection_latency_ms: isPositive
-      ? firstClick!.detection_latency_ms
-      : null,
     no_response_latency_ms: isPositive
       ? null
       : Math.max(0, Math.round(args.nowMs - args.videoEndedAtMs)),
@@ -110,7 +99,10 @@ export function buildVideoSubmission(
   });
 }
 
-export function buildSubmissionRpcParams(submission: VideoSubmission) {
+export function buildSubmissionRpcParams(
+  submission: VideoSubmission,
+  accessToken: string
+) {
   return {
     p_participant_id: submission.participant_id,
     p_session_number: submission.session_number,
@@ -120,6 +112,7 @@ export function buildSubmissionRpcParams(submission: VideoSubmission) {
     p_response_time_ms: submission.response_time_ms,
     p_no_response_latency_ms: submission.no_response_latency_ms,
     p_video_completed: submission.video_completed,
+    p_access_token: accessToken,
     p_clicks: submission.clicks.map((click) => ({
       click_index: click.click_index,
       video_time_at_click: click.video_time_at_click,

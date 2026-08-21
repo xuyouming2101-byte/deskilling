@@ -19,37 +19,26 @@ test("records repeated clicks with independent media and performance timing", ()
     clickIndex: 1,
     videoTimeSec: 2.1254,
     nowMs: 5_100.4,
-    playbackStartedAtMs: 1_000,
-    lesionOnsetSec: 3
+    playbackStartedAtMs: 1_000
   });
   const second = createLesionDetectionClick({
     clickIndex: 2,
     videoTimeSec: 4.5,
     nowMs: 7_000,
-    playbackStartedAtMs: 1_000,
-    lesionOnsetSec: 3
+    playbackStartedAtMs: 1_000
   });
 
   assert.deepEqual(first, {
     click_index: 1,
     video_time_at_click: 2.125,
-    response_time_ms: 4_100,
-    detection_latency_ms: -875
+    response_time_ms: 4_100
   });
   assert.equal(second.click_index, 2);
-  assert.equal(second.detection_latency_ms, 1_500);
-});
-
-test("keeps detection latency null when lesion onset is unavailable", () => {
-  const click = createLesionDetectionClick({
-    clickIndex: 1,
-    videoTimeSec: 8,
-    nowMs: 10_000,
-    playbackStartedAtMs: 1_000,
-    lesionOnsetSec: null
-  });
-
-  assert.equal(click.detection_latency_ms, null);
+  assert.deepEqual(Object.keys(second).sort(), [
+    "click_index",
+    "response_time_ms",
+    "video_time_at_click"
+  ]);
 });
 
 test("enables final actions only after the video ends", () => {
@@ -114,14 +103,12 @@ test("positive summary uses the first valid lesion click", () => {
       {
         click_index: 1,
         video_time_at_click: 2.125,
-        response_time_ms: 4_100,
-        detection_latency_ms: -875
+        response_time_ms: 4_100
       },
       {
         click_index: 2,
         video_time_at_click: 4.5,
-        response_time_ms: 6_000,
-        detection_latency_ms: 1_500
+        response_time_ms: 6_000
       }
     ],
     nowMs: 8_000,
@@ -131,8 +118,6 @@ test("positive summary uses the first valid lesion click", () => {
 
   assert.equal(submission.final_answer, true);
   assert.equal(submission.response_time_ms, 4_100);
-  assert.equal(submission.summary_video_time_at_click, 2.125);
-  assert.equal(submission.summary_detection_latency_ms, -875);
   assert.equal(submission.no_response_latency_ms, null);
   assert.equal(submission.clicks.length, 2);
 });
@@ -141,8 +126,7 @@ test("negative summary has no detection time and preserves overridden raw clicks
   const rawClick = {
     click_index: 1,
     video_time_at_click: 2.125,
-    response_time_ms: 4_100,
-    detection_latency_ms: -875
+    response_time_ms: 4_100
   };
   const submission = buildVideoSubmission({
     ...identity,
@@ -155,8 +139,6 @@ test("negative summary has no detection time and preserves overridden raw clicks
 
   assert.equal(submission.final_answer, false);
   assert.equal(submission.response_time_ms, 8_125);
-  assert.equal(submission.summary_video_time_at_click, null);
-  assert.equal(submission.summary_detection_latency_ms, null);
   assert.equal(submission.no_response_latency_ms, 1_125);
   assert.deepEqual(submission.clicks, [rawClick]);
 });
@@ -166,8 +148,7 @@ test("builds a deeply immutable pending submission snapshot", () => {
     {
       click_index: 1,
       video_time_at_click: 2.125,
-      response_time_ms: 4_100,
-      detection_latency_ms: -875
+      response_time_ms: 4_100
     }
   ];
   const submission = buildVideoSubmission({
@@ -202,24 +183,21 @@ test("rejects a positive final classification without lesion clicks", () => {
   );
 });
 
-test("maps a final submission to the exact RPC parameter contract", () => {
+test("maps a final submission and access token to the exact RPC parameter contract", () => {
   const params = buildSubmissionRpcParams({
     ...identity,
     final_answer: false,
     response_time_ms: 8_125,
-    summary_video_time_at_click: null,
-    summary_detection_latency_ms: null,
     no_response_latency_ms: 1_125,
     video_completed: true,
     clicks: [
       {
         click_index: 1,
         video_time_at_click: 2.125,
-        response_time_ms: 4_100,
-        detection_latency_ms: -875
+        response_time_ms: 4_100
       }
     ]
-  });
+  }, "a-secure-browser-local-token-that-is-long-enough");
 
   assert.deepEqual(params, {
     p_participant_id: "P001",
@@ -230,6 +208,7 @@ test("maps a final submission to the exact RPC parameter contract", () => {
     p_response_time_ms: 8_125,
     p_no_response_latency_ms: 1_125,
     p_video_completed: true,
+    p_access_token: "a-secure-browser-local-token-that-is-long-enough",
     p_clicks: [
       {
         click_index: 1,

@@ -68,6 +68,27 @@ test("integrates the seek-free player and atomic submission client", () => {
   assert.doesNotMatch(assessmentClientSource, /<video\b/);
 });
 
+test("uses only the server-owned safe queue RPC with a browser-local access token", () => {
+  assert.match(supabaseClientSource, /start_or_resume_assessment/);
+  assert.match(supabaseClientSource, /p_access_token:\s*accessToken/);
+  assert.match(assessmentClientSource, /getOrCreateAssessmentAccessToken/);
+  assert.match(assessmentClientSource, /loadAssessmentSession\([\s\S]*accessToken/);
+  assert.match(assessmentClientSource, /submitVideoResponse\(submission, accessToken\)/);
+  assert.doesNotMatch(supabaseClientSource, /\.from\(["']videos["']\)/);
+  assert.doesNotMatch(supabaseClientSource, /\.from\(["']assessment_queue["']\)/);
+  assert.doesNotMatch(componentAndLibSource, /has_lesion|lesion_onset_sec|hasLesion|lesionOnsetSec|detection_latency_ms/);
+  assert.doesNotMatch(supabaseClientSource, /p_study_mode|NEXT_PUBLIC_STUDY_MODE|getStudyMode/);
+});
+
+test("stores a versioned high-entropy access token without logging it", () => {
+  assert.match(supabaseClientSource, /assessment-access:v1:/);
+  assert.match(supabaseClientSource, /crypto\.getRandomValues/);
+  assert.match(supabaseClientSource, /localStorage\.setItem/);
+  assert.match(supabaseClientSource, /localStorage\.getItem/);
+  assert.doesNotMatch(supabaseClientSource, /console\.(?:log|warn|error)\([^)]*accessToken/s);
+  assert.doesNotMatch(assessmentClientSource, /console\.(?:log|warn|error)\([^)]*accessToken/s);
+});
+
 test("captures ended time and repeated click indexes through refs before state", () => {
   const endedBody = getFunctionBody(assessmentClientSource, "handleVideoEnded");
   assertLexicalOrder(endedBody, [
@@ -107,6 +128,29 @@ test("builds no before clearing visible clicks and retries the same object", () 
   const retryBody = getFunctionBody(assessmentClientSource, "retrySubmission");
   assert.match(retryBody, /submitPendingSubmission\(pendingSubmission\)/);
   assert.doesNotMatch(retryBody, /performance\.now|buildVideoSubmission/);
+});
+
+test("captures the no-response timestamp before SurveyJS validation", () => {
+  const noBody = getFunctionBody(lesionSurveySource, "handleFinalizeNo");
+  assertLexicalOrder(noBody, [
+    "const noClickedAtMs = performance.now();",
+    'validateFinalClassification("no")',
+    "onFinalizeNo(noClickedAtMs);"
+  ]);
+  assert.match(assessmentClientSource, /onFinalizeNo=\{\(noClickedAtMs\) => finalizeVideo\("no", noClickedAtMs\)\}/);
+  const finalizeBody = getFunctionBody(assessmentClientSource, "finalizeVideo");
+  assert.match(finalizeBody, /nowMs: finalizedAtMs,/);
+  assert.doesNotMatch(finalizeBody, /nowMs: performance\.now\(\)/);
+});
+
+test("uses six-hour private signed URLs without logging their secrets", () => {
+  assert.match(supabaseClientSource, /SIGNED_URL_EXPIRY_SECONDS = 6 \* 60 \* 60/);
+  assert.match(supabaseClientSource, /createSignedUrl\([^,]+, SIGNED_URL_EXPIRY_SECONDS\)/);
+  const signedUrlLog = supabaseClientSource.match(
+    /console\.log\("generated video URL", \{[\s\S]*?\n  \}\);/
+  )?.[0];
+  assert.ok(signedUrlLog, "Expected signed URL generation telemetry.");
+  assert.doesNotMatch(signedUrlLog, /signedUrl/);
 });
 
 test("keeps SurveyJS as validation boundary while rendering custom controls", () => {

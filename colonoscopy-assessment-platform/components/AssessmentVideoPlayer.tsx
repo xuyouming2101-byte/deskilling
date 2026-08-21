@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Maximize2,
   Pause,
   Play,
   Volume2,
@@ -72,7 +71,6 @@ const AssessmentVideoPlayer = forwardRef<
   forwardedRef
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const playerRef = useRef<HTMLElement | null>(null);
   const playbackStartedRef = useRef(false);
   const endedRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -169,10 +167,6 @@ const AssessmentVideoPlayer = forwardRef<
     setIsMuted(nextMuted);
   };
 
-  const enterFullscreen = () => {
-    void playerRef.current?.requestFullscreen?.().catch(() => undefined);
-  };
-
   const progressPercent =
     position.duration > 0
       ? Math.min(100, Math.max(0, (position.currentTime / position.duration) * 100))
@@ -184,7 +178,6 @@ const AssessmentVideoPlayer = forwardRef<
   return (
     <section
       className="assessment-video-player"
-      ref={playerRef}
       aria-label={`Colonoscopy video ${videoId}`}
     >
       <video
@@ -225,15 +218,6 @@ const AssessmentVideoPlayer = forwardRef<
             type="button"
           >
             {isMuted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
-          </button>
-          <button
-            aria-label="Enter fullscreen"
-            className="assessment-video-player__icon-button"
-            onClick={enterFullscreen}
-            title="Enter fullscreen"
-            type="button"
-          >
-            <Maximize2 aria-hidden="true" />
           </button>
         </div>
 
