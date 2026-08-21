@@ -3,6 +3,18 @@
 
 create extension if not exists pgcrypto with schema extensions;
 
+create table if not exists public.assessment_runtime_config (
+  id integer primary key check (id = 1),
+  study_mode text not null check (study_mode in ('dev', 'formal')),
+  updated_at timestamptz not null default now()
+);
+
+insert into public.assessment_runtime_config (id, study_mode)
+values (1, 'dev')
+on conflict (id) do nothing;
+
+alter table public.assessment_runtime_config enable row level security;
+
 create table if not exists public.assessment_session_access (
   participant_id text not null,
   session_number integer not null check (session_number between 1 and 3),
@@ -13,6 +25,8 @@ create table if not exists public.assessment_session_access (
 
 alter table public.assessment_session_access enable row level security;
 
+revoke all on table public.assessment_runtime_config
+  from public, anon, authenticated;
 revoke all on table public.assessment_session_access
   from public, anon, authenticated;
 revoke all on table public.assessment_queue
@@ -25,6 +39,9 @@ revoke all on table public.videos
 drop policy if exists "Allow anonymous videos lookup" on public.videos;
 drop policy if exists "Allow anonymous assessment queue lookup" on public.assessment_queue;
 drop policy if exists "Allow anonymous assessment queue inserts" on public.assessment_queue;
+drop policy if exists "Allow anonymous queue insert" on public.assessment_queue;
+drop policy if exists "Allow anonymous queue read" on public.assessment_queue;
+drop policy if exists "Allow anonymous read of video metadata" on public.videos;
 
 revoke all on function public.get_next_video_order(text, integer)
   from public, anon, authenticated;
@@ -59,11 +76,12 @@ create policy "Allow anonymous signed URL reads for video objects"
   to anon
   using (public.can_read_assessment_video_object(bucket_id, name));
 
+drop function if exists public.start_or_resume_assessment(text, integer, text, text);
+
 create or replace function public.start_or_resume_assessment(
   p_participant_id text,
   p_session_number integer,
-  p_access_token text,
-  p_study_mode text
+  p_access_token text
 )
 returns table (
   video_id text,
@@ -71,7 +89,8 @@ returns table (
   bucket text,
   file_path text,
   next_video_order integer,
-  queue_length integer
+  queue_length integer,
+  study_mode text
 )
 language plpgsql
 security definer
@@ -82,6 +101,7 @@ declare
   stored_digest bytea;
   normalized_mode text;
   existing_queue_length integer;
+  legacy_queue_matches_mode boolean;
   eligible_video_count integer;
   resolved_next_video_order integer;
 begin
@@ -97,9 +117,13 @@ begin
     raise exception 'assessment access token is invalid';
   end if;
 
-  normalized_mode := pg_catalog.lower(pg_catalog.btrim(coalesce(p_study_mode, '')));
-  if normalized_mode not in ('dev', 'formal') then
-    raise exception 'study_mode must be dev or formal';
+  select c.study_mode
+  into normalized_mode
+  from public.assessment_runtime_config c
+  where c.id = 1;
+
+  if not found then
+    raise exception 'assessment runtime configuration is missing';
   end if;
 
   token_digest := extensions.digest(p_access_token, 'sha256');
@@ -127,9 +151,25 @@ begin
     where q.participant_id = p_participant_id
       and q.session_number = p_session_number;
 
-    -- A pre-hardening legacy DEV queue may be claimed exactly once by its first holder.
-    if existing_queue_length > 0 and normalized_mode <> 'dev' then
-      raise exception 'formal assessment session must be provisioned before use';
+    if existing_queue_length > 0 then
+      select not exists (
+        select 1
+        from public.assessment_queue q
+        join public.videos v on v.video_id = q.video_id
+        where q.participant_id = p_participant_id
+          and q.session_number = p_session_number
+          and (
+            case
+              when normalized_mode = 'dev' then v.is_test is true
+              else v.is_test is false and v.session_pool = p_session_number
+            end
+          ) is not true
+      )
+      into legacy_queue_matches_mode;
+
+      if legacy_queue_matches_mode is not true then
+        raise exception 'legacy queue does not match configured study mode';
+      end if;
     end if;
 
     insert into public.assessment_session_access (
@@ -226,7 +266,8 @@ begin
     v.bucket,
     v.file_path,
     resolved_next_video_order,
-    existing_queue_length
+    existing_queue_length,
+    normalized_mode
   from public.assessment_queue q
   join public.videos v on v.video_id = q.video_id
   where q.participant_id = p_participant_id
@@ -420,6 +461,10 @@ begin
     )
     order by click_row.click_index
     limit 1;
+
+    if p_answer is true and p_response_time_ms <> first_response_time_ms then
+      raise exception 'positive response_time_ms must equal the first lesion click response_time_ms';
+    end if;
   end if;
 
   select coalesce(
@@ -486,7 +531,7 @@ begin
     -- An idempotent replay returns success only for the exact committed payload.
     if existing_response.answer = p_answer
        and existing_response.correct = (video_has_lesion = p_answer)
-       and existing_response.response_time_ms = case when p_answer then first_response_time_ms else p_response_time_ms end
+       and existing_response.response_time_ms = p_response_time_ms
        and existing_response.video_time_at_click is not distinct from case when p_answer then first_video_time else null end
        and existing_response.detection_latency_ms is not distinct from case when p_answer then first_detection_latency_ms else null end
        and existing_response.response_type = case when p_answer then 'lesion_detected' else 'no_lesion_detected' end
@@ -592,9 +637,9 @@ begin
 end
 $$;
 
-revoke all on function public.start_or_resume_assessment(text, integer, text, text)
+revoke all on function public.start_or_resume_assessment(text, integer, text)
   from public, authenticated;
-grant execute on function public.start_or_resume_assessment(text, integer, text, text)
+grant execute on function public.start_or_resume_assessment(text, integer, text)
   to anon;
 
 revoke all on function public.submit_video_response(
@@ -622,8 +667,8 @@ grant execute on function public.submit_video_response(
   text
 ) to anon;
 
-comment on function public.start_or_resume_assessment(text, integer, text, text)
-is 'SECURITY DEFINER is intentional: a private browser-held token binds a participant/session to server-owned queue creation and resume data without exposing videos or assessment_queue tables.';
+comment on function public.start_or_resume_assessment(text, integer, text)
+is 'SECURITY DEFINER is intentional: a private browser-held token binds a participant/session to server-owned queue creation and resume data. The authoritative study mode is read only from protected runtime configuration.';
 
 comment on function public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb, text)
 is 'SECURITY DEFINER is intentional: a verified session token, first-unanswered-order check, and exact idempotent replay comparison protect the atomic response and lesion-click audit write boundary.';

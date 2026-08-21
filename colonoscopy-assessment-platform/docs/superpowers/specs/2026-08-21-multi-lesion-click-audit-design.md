@@ -179,15 +179,18 @@ The browser creates one high-entropy access token for each
 database stores only its SHA-256 digest in `assessment_session_access`; no
 browser role can read the table or recover the token. A first start creates the
 binding and a server-owned randomized queue. An existing legacy development
-queue may be claimed once when it has no binding; formal queues are never
-claimed through this compatibility path.
+queue may be claimed once only after every queued video is verified against the
+protected runtime mode. The mode is stored in the single-row
+`assessment_runtime_config` table, defaults to `dev` without overwriting an
+existing value, and is not supplied by the browser.
 
-`start_or_resume_assessment(participant_id, session_number, access_token,
-study_mode)` is the only browser-accessible queue API. It acquires a
+`start_or_resume_assessment(participant_id, session_number, access_token)` is
+the only browser-accessible queue API. It acquires a
 participant/session advisory transaction lock, validates or creates the token
-binding, applies the existing DEV/FORMAL pool rules, creates a queue only when
-absent, and returns only `video_id`, `video_order`, `bucket`, `file_path`,
-`next_video_order`, and `queue_length`. It never returns `has_lesion` or
+binding, reads the authoritative mode, applies the existing DEV/FORMAL pool
+rules, creates a queue only when absent, and returns only `video_id`,
+`video_order`, `bucket`, `file_path`, `next_video_order`, `queue_length`, and
+the authoritative `study_mode`. It never returns `has_lesion` or
 `lesion_onset_sec`.
 
 Anonymous clients have no direct privileges or policies on `videos`,
@@ -202,6 +205,9 @@ matching already-committed response and complete derived click-event set is
 treated as success, so a lost HTTP acknowledgement can be retried safely. A
 different replay is rejected. Server-side code alone reads lesion truth and
 onset, computes correctness and signed latency, and derives all event flags.
+For a positive response, `response_time_ms` must exactly equal the first click
+event's `response_time_ms`; therefore a retry cannot alter the summary while
+retaining an otherwise matching event payload.
 
 ## SurveyJS and React Responsibilities
 

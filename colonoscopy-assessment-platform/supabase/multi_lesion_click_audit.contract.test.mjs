@@ -101,14 +101,29 @@ test("binds queue creation, resume, and submission to a private session token", 
   );
   assert.match(sql, /pg_catalog\.pg_advisory_xact_lock/i);
   assert.match(sql, /extensions\.digest\(p_access_token, 'sha256'\)/i);
-  assert.match(sql, /legacy DEV queue/i);
+  assert.match(sql, /create table if not exists public\.assessment_runtime_config/i);
+  assert.match(sql, /id integer primary key check \(id = 1\)/i);
+  assert.match(sql, /study_mode text not null check \(study_mode in \('dev', 'formal'\)\)/i);
+  assert.match(
+    sql,
+    /insert into public\.assessment_runtime_config \(id, study_mode\)\s+values \(1, 'dev'\)\s+on conflict \(id\) do nothing;/i
+  );
+  assert.match(sql, /from public\.assessment_runtime_config c/i);
+  assert.match(sql, /legacy queue does not match configured study mode/i);
+  assert.match(sql, /v\.is_test is true/i);
+  assert.match(sql, /v\.is_test is false/i);
   assert.match(sql, /normalized_mode = 'dev'/i);
   assert.match(sql, /normalized_mode = 'formal'/i);
   assert.match(sql, /order by pg_catalog\.random\(\)/i);
   assert.match(sql, /'Session %s is not ready: %s\/40 formal videos configured\.'/i);
+  assert.doesNotMatch(sql, /p_study_mode/i);
   assert.match(
     sql,
-    /returns table \(\s*video_id text,\s*video_order integer,\s*bucket text,\s*file_path text,\s*next_video_order integer,\s*queue_length integer\s*\)\s*language/i
+    /start_or_resume_assessment\(\s*p_participant_id text,\s*p_session_number integer,\s*p_access_token text\s*\)/is
+  );
+  assert.match(
+    sql,
+    /returns table \(\s*video_id text,\s*video_order integer,\s*bucket text,\s*file_path text,\s*next_video_order integer,\s*queue_length integer,\s*study_mode text\s*\)\s*language/i
   );
 });
 
@@ -137,6 +152,21 @@ test("removes anonymous table reads and makes token-bound submissions ordered an
     assert.doesNotMatch(sql, /create policy "Allow anonymous (?:videos|assessment queue)/i, name);
     assert.match(
       sql,
+      /drop policy if exists "Allow anonymous queue insert"\s+on public\.assessment_queue;/i,
+      name
+    );
+    assert.match(
+      sql,
+      /drop policy if exists "Allow anonymous queue read"\s+on public\.assessment_queue;/i,
+      name
+    );
+    assert.match(
+      sql,
+      /drop policy if exists "Allow anonymous read of video metadata"\s+on public\.videos;/i,
+      name
+    );
+    assert.match(
+      sql,
       /revoke all on function public\.get_next_video_order\(text, integer\)[\s\S]*?from public, anon, authenticated;/i,
       name
     );
@@ -150,6 +180,11 @@ test("removes anonymous table reads and makes token-bound submissions ordered an
     assert.match(sql, /existing response differs from retry payload/i, name);
     assert.match(
       sql,
+      /if p_answer is true and p_response_time_ms <> first_response_time_ms then\s+raise exception 'positive response_time_ms must equal the first lesion click response_time_ms';/is,
+      name
+    );
+    assert.match(
+      sql,
       /grant execute on function public\.start_or_resume_assessment\([\s\S]*?\) to anon;/i,
       name
     );
@@ -159,6 +194,16 @@ test("removes anonymous table reads and makes token-bound submissions ordered an
       name
     );
   }
+});
+
+test("installs pgcrypto in extensions before functions reference extensions.digest", async () => {
+  const sql = await readFile(new URL("./schema.sql", import.meta.url), "utf8");
+
+  assert.match(
+    sql,
+    /^create extension if not exists pgcrypto with schema extensions;/im
+  );
+  assert.doesNotMatch(sql, /^create extension if not exists pgcrypto;$/im);
 });
 
 test("uses a distinct no-click video to prove duplicate-response rollback", async () => {

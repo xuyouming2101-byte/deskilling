@@ -1383,7 +1383,7 @@ git commit -m "docs: explain auditable lesion response workflow"
 - Modify: `docs/superpowers/plans/2026-08-21-multi-lesion-click-audit.md`
 
 **Interfaces:**
-- `start_or_resume_assessment(text, integer, text, text)` is the only browser queue API.
+- `start_or_resume_assessment(text, integer, text)` is the only browser queue API.
 - `submit_video_response(..., jsonb, text)` verifies the same session access token.
 
 - [x] Add source-contract coverage for token validation, private queue/video access,
@@ -1391,12 +1391,14 @@ git commit -m "docs: explain auditable lesion response workflow"
 - [x] Store only a SHA-256 token digest in `assessment_session_access`; revoke all
   browser-role table access.
 - [x] Move persistent queue creation and resume into a locked SECURITY DEFINER RPC
-  that returns no lesion truth or onset metadata.
+  that reads protected runtime mode, validates legacy queues against that mode,
+  and returns no lesion truth or onset metadata.
 - [x] Revoke anonymous `videos`, `assessment_queue`, and `get_next_video_order`
   access while preserving private Storage signed URL validation through a narrow
   SECURITY DEFINER predicate.
 - [x] Require the earliest unanswered queue order for a new response and accept only
-  exact persisted payload/event replays as idempotent success.
+  exact persisted payload/event replays as idempotent success, including an
+  exact positive summary time match to the first click.
 - [x] Preserve server-side signed latency, raw overridden events, and the atomic
   event-before-response transaction.
 - [ ] Apply this migration and run remote authorization, replay, and rollback tests.
