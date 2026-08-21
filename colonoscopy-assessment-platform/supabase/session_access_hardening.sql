@@ -585,11 +585,11 @@ begin
     if existing_response.answer = p_answer
        and existing_response.correct = (video_has_lesion = p_answer)
        and existing_response.response_time_ms = p_response_time_ms
-       and existing_response.video_time_at_click is not distinct from case when p_answer then first_video_time else null end
-       and existing_response.detection_latency_ms is not distinct from case when p_answer then first_detection_latency_ms else null end
-       and existing_response.response_type = case when p_answer then 'lesion_detected' else 'no_lesion_detected' end
+       and existing_response.video_time_at_click is not distinct from (case when p_answer then first_video_time else null end)
+       and existing_response.detection_latency_ms is not distinct from (case when p_answer then first_detection_latency_ms else null end)
+       and existing_response.response_type = (case when p_answer then 'lesion_detected' else 'no_lesion_detected' end)
        and existing_response.video_completed is true
-       and existing_response.no_response_latency_ms is not distinct from case when p_answer then null else p_no_response_latency_ms end
+       and existing_response.no_response_latency_ms is not distinct from (case when p_answer then null else p_no_response_latency_ms end)
        and stored_events = expected_events then
       return;
     end if;

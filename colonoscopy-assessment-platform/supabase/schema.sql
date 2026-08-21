@@ -779,11 +779,11 @@ begin
     -- An idempotent replay returns success only for the exact committed payload.
     if existing.answer = p_answer and existing.correct = (has_lesion = p_answer)
       and existing.response_time_ms = p_response_time_ms
-      and existing.video_time_at_click is not distinct from case when p_answer then first_time else null end
-      and existing.detection_latency_ms is not distinct from case when p_answer then first_latency else null end
-      and existing.response_type = case when p_answer then 'lesion_detected' else 'no_lesion_detected' end
+      and existing.video_time_at_click is not distinct from (case when p_answer then first_time else null end)
+      and existing.detection_latency_ms is not distinct from (case when p_answer then first_latency else null end)
+      and existing.response_type = (case when p_answer then 'lesion_detected' else 'no_lesion_detected' end)
       and existing.video_completed is true
-      and existing.no_response_latency_ms is not distinct from case when p_answer then null else p_no_response_latency_ms end
+      and existing.no_response_latency_ms is not distinct from (case when p_answer then null else p_no_response_latency_ms end)
       and stored_events = expected_events then return; end if;
     raise exception 'existing response differs from retry payload';
   end if;

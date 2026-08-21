@@ -291,6 +291,60 @@ test("terminates every hardening PL/pgSQL function body with end semicolon", asy
   }
 });
 
+test("parenthesizes CASE expressions used as idempotency comparison values", async () => {
+  const sources = await Promise.all(
+    [
+      new URL("./schema.sql", import.meta.url),
+      new URL("./session_access_hardening.sql", import.meta.url)
+    ].map(async (file) => ({
+      name: file.pathname,
+      sql: await readFile(file, "utf8")
+    }))
+  );
+
+  const comparisons = [
+    {
+      column: "video_time_at_click",
+      operator: "is not distinct from"
+    },
+    {
+      column: "detection_latency_ms",
+      operator: "is not distinct from"
+    },
+    {
+      column: "response_type",
+      operator: "="
+    },
+    {
+      column: "no_response_latency_ms",
+      operator: "is not distinct from"
+    }
+  ];
+
+  for (const { name, sql } of sources) {
+    for (const { column, operator } of comparisons) {
+      const escapedOperator = operator.replaceAll(" ", "\\s+");
+
+      assert.match(
+        sql,
+        new RegExp(
+          `existing(?:_response)?\\.${column}\\s+${escapedOperator}\\s+\\(case\\s+when\\s+p_answer[\\s\\S]*?end\\)`,
+          "i"
+        ),
+        `${name}: ${column}`
+      );
+      assert.doesNotMatch(
+        sql,
+        new RegExp(
+          `existing(?:_response)?\\.${column}\\s+${escapedOperator}\\s+case\\b`,
+          "i"
+        ),
+        `${name}: ${column}`
+      );
+    }
+  }
+});
+
 test("uses a distinct no-click video to prove duplicate-response rollback", async () => {
   const sources = await Promise.all(
     verificationArtifacts.map(async (file) => ({
