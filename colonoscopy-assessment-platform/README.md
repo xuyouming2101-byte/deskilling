@@ -9,7 +9,7 @@ Minimal Next.js assessment loop:
 5. Call `get_next_video_order(participant_id, session_number)` and resume at that persisted `video_order`.
 6. Create a signed URL for each private Supabase Storage object using its `bucket` and `file_path`.
 7. Show `Video X / queue length`, play the current video, and ask `Yes` or `No` with SurveyJS Form Library.
-8. Insert one row into the Supabase `responses` table after each submitted answer.
+8. Submit the final classification and all raw lesion clicks through the atomic `submit_video_response` RPC.
 9. Automatically advance to the next video, then show a completion page after every queued video has a saved response.
 
 Survey Creator and admin drag-and-drop editing are not included.
@@ -85,30 +85,42 @@ this MVP only validates the technical multi-session workflow.
    npm run dev
    ```
 
-## responses table
+## Atomic response and click audit data
 
-The MVP writes:
+PostgreSQL generates all `id` and `created_at` values. The browser never sends
+them. A completed video is submitted through
+`public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb)`.
+The `SECURITY INVOKER` RPC validates the matching `assessment_queue` row,
+completion state, timing values, and contiguous click indexes, then inserts raw
+events before the final response. Any validation or unique-response error rolls
+back both inserts.
 
-PostgreSQL generates `id` and `created_at`; the app does not send either field.
+`responses` remains one final row per queued video:
 
-- `participant_id`: entered before the assessment starts
-- `session_number`: selected before the assessment starts, limited to `1`, `2`, or `3`
-- `video_id`: current queue item from the persisted assessment queue
-- `video_order`: persisted `assessment_queue.video_order`, `1` through the queue length
-- `answer`: `yes` or `no`
-- `correct`: calculated from `videos.has_lesion`
-- `response_type`: `lesion_detected` or `no_lesion_detected`
-- `response_time_ms`: playback-start to answer-click elapsed time in milliseconds
-- `video_time_at_click`: HTML5 video `currentTime` at the first answer click, stored in seconds with millisecond precision
-- `detection_latency_ms`: for `Lesion detected`, `(video_time_at_click - lesion_onset_sec) * 1000` when `videos.lesion_onset_sec` is available
-- `video_completed`: whether the video had reached the end at the time of response
+- `answer` is boolean: `true` for `Lesion detected`, `false` for `No lesion detected`.
+- `correct` is calculated in PostgreSQL from `videos.has_lesion`.
+- `response_type` is derived from the final boolean answer.
+- `response_time_ms` is the playback-start elapsed time for the first valid lesion click (`true`) or the final no-lesion action (`false`).
+- `video_time_at_click` and `detection_latency_ms` summarize the first valid click for `true`; both are null for `false`.
+- `no_response_latency_ms` is null for `true`; for `false`, it is the non-negative elapsed time from the actual video end to the final no-lesion action.
+- `video_completed` must be `true`.
 
-The insert payload does not send `created_at`; PostgreSQL fills it with the
-table default `now()`.
+`lesion_detection_events` stores every raw `Lesion detected` click with the
+participant/session/queue identity, ordered `click_index`, media time,
+playback-start elapsed time, a snapshot of `lesion_onset_sec`, signed
+`detection_latency_ms`, and finalization flags. Negative detection latency is
+preserved when a click precedes the stored onset. A final `true` marks every
+submitted event `final_valid = true` and `overridden = false`. A final `false`
+retains submitted clicks for audit but marks them `final_valid = false` and
+`overridden = true`; a no-click negative response has no event rows.
 
-`Lesion detected` is available after playback starts. `No lesion detected` is
-available only after the video reaches the end. The first response click locks
-the response so it cannot be changed.
+Anonymous clients receive only the privileges required to call the RPC and
+insert through its RLS checks. They have no `SELECT`, `UPDATE`, or `DELETE`
+access to either `responses` or `lesion_detection_events`.
+
+The participant workflow permits repeated lesion clicks only after playback
+starts. Final classification is available only after the actual HTML5 `ended`
+event; completed videos do not expose forward seek, replay, or redo controls.
 
 Refreshing or reopening the same `participant_id` + `session_number` resumes
 from the first persisted queue item returned by the `get_next_video_order` RPC.
