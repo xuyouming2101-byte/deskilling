@@ -410,7 +410,7 @@ begin
     true,
     case when p_answer then null else p_no_response_latency_ms end
   );
-end
+end;
 $$;
 
 revoke all on function public.submit_video_response(
@@ -690,7 +690,7 @@ begin
   from public.assessment_queue q join public.videos v on v.video_id = q.video_id
   where q.participant_id = p_participant_id and q.session_number = p_session_number
   order by q.video_order;
-end
+end;
 $$;
 
 -- The old nine-argument function remains an owner-only internal writer.
@@ -795,7 +795,7 @@ begin
   if current_order is null then raise exception 'assessment session is already complete'; end if;
   if p_video_order <> current_order then raise exception 'submission must target the first unanswered queue order'; end if;
   perform public.submit_video_response(p_participant_id, p_session_number, p_video_id, p_video_order, p_answer, p_response_time_ms, p_no_response_latency_ms, p_video_completed, p_clicks);
-end
+end;
 $$;
 
 revoke all on function public.start_or_resume_assessment(text, integer, text) from public, authenticated;

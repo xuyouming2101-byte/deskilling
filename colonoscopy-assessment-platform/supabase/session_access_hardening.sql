@@ -326,7 +326,7 @@ begin
   where q.participant_id = p_participant_id
     and q.session_number = p_session_number
   order by q.video_order;
-end
+end;
 $$;
 
 drop function if exists public.submit_video_response(
@@ -687,7 +687,7 @@ begin
     true,
     case when p_answer then null else p_no_response_latency_ms end
   );
-end
+end;
 $$;
 
 revoke all on function public.start_or_resume_assessment(text, integer, text)

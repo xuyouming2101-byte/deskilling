@@ -262,6 +262,35 @@ test("installs pgcrypto in extensions before functions reference extensions.dige
   assert.doesNotMatch(sql, /^create extension if not exists pgcrypto;$/im);
 });
 
+test("terminates every hardening PL/pgSQL function body with end semicolon", async () => {
+  const cases = [
+    {
+      file: new URL("./session_access_hardening.sql", import.meta.url),
+      expectedBodyCount: 2
+    },
+    {
+      file: new URL("./schema.sql", import.meta.url),
+      expectedBodyCount: 3
+    }
+  ];
+
+  for (const { file, expectedBodyCount } of cases) {
+    const sql = await readFile(file, "utf8");
+    const functionStatements =
+      sql.match(/create or replace function[\s\S]*?\$\$;/gi) ?? [];
+    const plpgsqlFunctions = functionStatements.filter((statement) =>
+      /language plpgsql/i.test(statement)
+    );
+
+    assert.equal(plpgsqlFunctions.length, expectedBodyCount, file.pathname);
+
+    for (const statement of plpgsqlFunctions) {
+      assert.doesNotMatch(statement, /\nend\n\$\$;$/i, file.pathname);
+      assert.match(statement, /\nend;\n\$\$;$/i, file.pathname);
+    }
+  }
+});
+
 test("uses a distinct no-click video to prove duplicate-response rollback", async () => {
   const sources = await Promise.all(
     verificationArtifacts.map(async (file) => ({
