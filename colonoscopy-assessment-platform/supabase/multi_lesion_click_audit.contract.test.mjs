@@ -7,6 +7,17 @@ const sqlFiles = [
   new URL("./schema.sql", import.meta.url)
 ];
 
+const verificationArtifacts = [
+  new URL(
+    "../docs/superpowers/plans/2026-08-21-multi-lesion-click-audit.md",
+    import.meta.url
+  ),
+  new URL(
+    "../../.superpowers/sdd/2026-08-21-multi-lesion-click-audit/task-2-brief.md",
+    import.meta.url
+  )
+];
+
 test("keeps response and event writes behind the trusted RPC boundary", async () => {
   const sources = await Promise.all(
     sqlFiles.map(async (file) => ({
@@ -65,5 +76,25 @@ test("keeps response and event writes behind the trusted RPC boundary", async ()
         sql.indexOf("insert into public.responses"),
       name
     );
+  }
+});
+
+test("uses a distinct no-click video to prove duplicate-response rollback", async () => {
+  const sources = await Promise.all(
+    verificationArtifacts.map(async (file) => ({
+      name: file.pathname,
+      text: await readFile(file, "utf8")
+    }))
+  );
+
+  for (const { name, text } of sources) {
+    assert.match(text, /limit 3;/, name);
+    assert.match(
+      text,
+      /video_order = 3[\s\S]*?\n\s*3,\n\s*false,[\s\S]*?'\[\]'::jsonb/s,
+      name
+    );
+    assert.match(text, /do \$\$[\s\S]*?when unique_violation then/s, name);
+    assert.match(text, /video 3 still has zero events/i, name);
   }
 });

@@ -873,7 +873,7 @@ select
 from public.videos
 where is_test = true
 order by video_id
-limit 2;
+limit 3;
 
 set local role anon;
 
@@ -911,6 +911,49 @@ select public.submit_video_response(
   '[{"click_index":1,"video_time_at_click":2.125,"response_time_ms":4100}]'::jsonb
 );
 
+select public.submit_video_response(
+  '__codex_multi_click_rpc_test__',
+  1,
+  (
+    select video_id
+    from public.assessment_queue
+    where participant_id = '__codex_multi_click_rpc_test__'
+      and video_order = 3
+  ),
+  3,
+  false,
+  9000,
+  1000,
+  true,
+  '[]'::jsonb
+);
+
+do $$
+begin
+  begin
+    perform public.submit_video_response(
+      '__codex_multi_click_rpc_test__',
+      1,
+      (
+        select video_id
+        from public.assessment_queue
+        where participant_id = '__codex_multi_click_rpc_test__'
+          and video_order = 3
+      ),
+      3,
+      true,
+      4100,
+      null,
+      true,
+      '[{"click_index":1,"video_time_at_click":2.125,"response_time_ms":4100}]'::jsonb
+    );
+    raise exception 'expected responses_unique_trial violation';
+  exception
+    when unique_violation then null;
+  end;
+end
+$$;
+
 reset role;
 
 select answer, video_time_at_click, detection_latency_ms,
@@ -924,6 +967,17 @@ from public.lesion_detection_events
 where participant_id = '__codex_multi_click_rpc_test__'
 order by video_order, click_index;
 
+select q.video_order, count(e.id)::integer as event_count
+from public.assessment_queue q
+left join public.lesion_detection_events e
+  on e.participant_id = q.participant_id
+  and e.session_number = q.session_number
+  and e.video_id = q.video_id
+where q.participant_id = '__codex_multi_click_rpc_test__'
+  and q.session_number = 1
+group by q.video_order
+order by q.video_order;
+
 rollback;
 ~~~
 
@@ -932,10 +986,11 @@ Expected:
 - Positive response uses answer = true and first-click summary.
 - Negative response uses answer = false, null detection fields, and no_response_latency_ms = 1125.
 - Positive events are final_valid; negative event is overridden.
+- Video 3 has a final no response with no events before the duplicate attempt.
 - Rollback leaves no test rows.
 - Anonymous direct INSERT and SELECT privileges are false for both tables; a REST insert attempt must be rejected.
 - The anon RPC calls succeed despite the direct-table revocations.
-- After the positive RPC, retry the same response inside a savepoint with a new click index. It must fail with the response unique constraint; roll back to that savepoint and verify the event count for that video remains two, proving the attempted event insert rolled back with the failed response.
+- The video 3 duplicate yes call runs inside a PL/pgSQL exception subtransaction, reaches `responses_unique_trial`, and catches only `unique_violation`; the outer transaction remains usable and video 3 still has zero events afterward.
 
 Run Supabase security and performance advisors and resolve any finding caused by this migration.
 
