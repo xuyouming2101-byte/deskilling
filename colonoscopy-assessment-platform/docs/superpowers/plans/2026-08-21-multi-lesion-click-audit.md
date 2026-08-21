@@ -1375,6 +1375,10 @@ git commit -m "docs: explain auditable lesion response workflow"
 
 ### Task 7: Harden session, queue, and submit authorization
 
+> Historical intermediate contract. Task 10 replaces browser-generated tokens
+> and direct browser Storage signing with coordinator enrollment and
+> service-role current-video authorization.
+
 **Files:**
 - Create: `supabase/session_access_hardening.sql`
 - Modify: `supabase/schema.sql`
@@ -1399,7 +1403,7 @@ git commit -m "docs: explain auditable lesion response workflow"
   references.
 - [x] Revoke anonymous `videos`, `assessment_queue`, and `get_next_video_order`
   access while preserving private Storage signed URL validation through a narrow
-  SECURITY DEFINER predicate.
+  SECURITY DEFINER predicate. This interim predicate is superseded by Task 10.
 - [x] Require the earliest unanswered queue order for a new response and accept only
   exact persisted payload/event replays as idempotent success, including an
   exact positive summary time match to the first click.
@@ -1407,9 +1411,52 @@ git commit -m "docs: explain auditable lesion response workflow"
   event-before-response transaction.
 - [ ] Apply this migration and run remote authorization, replay, and rollback tests.
 
+---
+
+### Task 10: Require enrollment and authorize only the current private video
+
+**Files:**
+- Create: `supabase/assessment_enrollment_hardening.sql`
+- Modify: `supabase/schema.sql`
+- Modify: `supabase/multi_lesion_click_audit.contract.test.mjs`
+- Modify: `docs/superpowers/specs/2026-08-21-multi-lesion-click-audit-design.md`
+- Modify: `docs/superpowers/plans/2026-08-21-multi-lesion-click-audit.md`
+- Modify: `README.md`
+
+**Interfaces:**
+- `start_or_resume_assessment(text, integer, text)` accepts a coordinator-issued
+  access code and returns queue identity/progress without Storage paths.
+- `submit_video_response(..., jsonb, text)` validates the same enrollment code
+  and authoritative mode.
+- `authorize_current_assessment_video(text, integer, integer, text)` is
+  service-role-only and returns the current object's bucket/path.
+
+- [x] Add protected `assessment_enrollments` with active status, authorized mode,
+  and SHA-256 access-code digest; browser roles receive no table access.
+- [x] Backfill only old access bindings that match an explicit enrollment, remove
+  unmatched credential bindings without touching queues/responses, and enforce
+  digest/mode constraints plus a composite enrollment foreign key.
+- [x] Replace browser-generated token validation with a minimum 20-character
+  coordinator-issued access code and one generic credential error.
+- [x] Require enrollment mode, session-access mode, and protected runtime mode to
+  agree for queue start/resume, submission, and current-video authorization.
+- [x] Keep server-owned randomization, exact legacy-queue validation, ordered
+  submission, and exact idempotent replay behavior unchanged.
+- [x] Remove bucket/file path from the browser queue RPC and expose it only for
+  the first unanswered order through a service-role-only RPC.
+- [x] Drop anonymous Storage `SELECT` policies and the global object predicate;
+  do not grant the browser direct listing, signing, or download access.
+- [x] Mirror the final state in `schema.sql` without overwriting runtime mode or
+  modifying queue/response data.
+- [x] Document coordinator provisioning and explicit legacy-queue recovery.
+- [ ] Apply the migration remotely and add the Edge Function/browser integration
+  in a later task; Task 10 deliberately changes only database/docs contracts.
+
 ## Self-Review
 
 - Every approved behavior maps to a task and a verification step.
 - Positive and negative timing types are consistent between TypeScript, RPC parameters, and SQL.
-- No step changes queue randomization, session lifecycle, signed URL generation, or existing response rows.
+- Queue randomization, session lifecycle, and existing response rows remain
+  unchanged. Task 10 deliberately moves temporary signed-URL authorization from
+  the anonymous browser to a trusted current-video Edge Function.
 - The plan contains no placeholder implementation steps.

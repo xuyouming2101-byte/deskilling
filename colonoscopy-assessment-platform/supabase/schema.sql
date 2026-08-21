@@ -474,21 +474,7 @@ drop policy if exists "Allow anonymous V001 video reads"
 drop policy if exists "Allow anonymous signed URL reads for video objects"
   on storage.objects;
 
-create policy "Allow anonymous signed URL reads for video objects"
-  on storage.objects
-  for select
-  to anon
-  using (
-    bucket_id = 'SSL'
-    and exists (
-      select 1
-      from public.videos v
-      where v.bucket = storage.objects.bucket_id
-        and v.file_path = storage.objects.name
-      )
-  );
-
--- Canonical fresh-install form of session_access_hardening.sql.
+-- Canonical fresh-install form of assessment_enrollment_hardening.sql.
 
 create table if not exists public.assessment_runtime_config (
   id integer primary key check (id = 1),
@@ -502,16 +488,42 @@ on conflict (id) do nothing;
 
 alter table public.assessment_runtime_config enable row level security;
 
+create table if not exists public.assessment_enrollments (
+  participant_id text not null,
+  session_number integer not null check (session_number between 1 and 3),
+  access_code_digest bytea not null check (pg_catalog.octet_length(access_code_digest) = 32),
+  study_mode text not null check (study_mode in ('dev', 'formal')),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (participant_id, session_number),
+  constraint assessment_enrollments_binding_key
+    unique (participant_id, session_number, access_code_digest, study_mode)
+);
+alter table public.assessment_enrollments enable row level security;
+
 create table if not exists public.assessment_session_access (
   participant_id text not null,
   session_number integer not null check (session_number between 1 and 3),
-  access_token_digest bytea not null check (pg_catalog.octet_length(access_token_digest) = 32),
+  access_code_digest bytea not null check (pg_catalog.octet_length(access_code_digest) = 32),
+  study_mode text not null check (study_mode in ('dev', 'formal')),
   created_at timestamptz not null default now(),
-  primary key (participant_id, session_number)
+  primary key (participant_id, session_number),
+  constraint assessment_session_access_enrollment_fkey
+    foreign key (participant_id, session_number, access_code_digest, study_mode)
+    references public.assessment_enrollments (
+      participant_id,
+      session_number,
+      access_code_digest,
+      study_mode
+    )
+    on update restrict
+    on delete cascade
 );
 alter table public.assessment_session_access enable row level security;
 
 revoke all on table public.assessment_runtime_config from public, anon, authenticated;
+revoke all on table public.assessment_enrollments from public, anon, authenticated;
 revoke all on table public.assessment_session_access from public, anon, authenticated;
 revoke all on table public.assessment_queue from public, anon, authenticated;
 revoke all on sequence public.assessment_queue_id_seq from public, anon, authenticated;
@@ -524,36 +536,27 @@ drop policy if exists "Allow anonymous queue read" on public.assessment_queue;
 drop policy if exists "Allow anonymous read of video metadata" on public.videos;
 revoke all on function public.get_next_video_order(text, integer) from public, anon, authenticated;
 
-create or replace function public.can_read_assessment_video_object(p_bucket text, p_object_name text)
-returns boolean
-language sql security definer set search_path = ''
-as $$
-  select exists (
-    select 1 from public.videos v
-    where v.bucket = p_bucket and v.file_path = p_object_name
-  );
-$$;
-revoke all on function public.can_read_assessment_video_object(text, text) from public, authenticated;
-grant execute on function public.can_read_assessment_video_object(text, text) to anon;
 drop policy if exists "Allow anonymous signed URL reads for video objects" on storage.objects;
-create policy "Allow anonymous signed URL reads for video objects"
-  on storage.objects for select to anon
-  using (public.can_read_assessment_video_object(bucket_id, name));
+drop function if exists public.can_read_assessment_video_object(text, text);
 
 drop function if exists public.start_or_resume_assessment(text, integer, text, text);
+drop function if exists public.start_or_resume_assessment(text, integer, text);
 
 create or replace function public.start_or_resume_assessment(
-  p_participant_id text, p_session_number integer, p_access_token text
+  p_participant_id text, p_session_number integer, p_access_code text
 )
 returns table (
-  video_id text, video_order integer, bucket text, file_path text,
+  video_id text, video_order integer,
   next_video_order integer, queue_length integer, study_mode text
 )
 language plpgsql security definer set search_path = ''
 as $$
 declare
-  token_digest bytea;
+  provided_digest bytea;
+  enrollment_digest bytea;
+  enrollment_mode text;
   stored_digest bytea;
+  stored_mode text;
   normalized_mode text;
   existing_queue_length integer;
   legacy_queue_matches_mode boolean;
@@ -572,8 +575,8 @@ begin
   if p_session_number is null or p_session_number not between 1 and 3 then
     raise exception 'session_number must be 1, 2, or 3';
   end if;
-  if pg_catalog.length(coalesce(p_access_token, '')) < 32 then
-    raise exception 'assessment access token is invalid';
+  if pg_catalog.length(coalesce(p_access_code, '')) < 20 then
+    raise exception 'assessment credentials are invalid';
   end if;
   select c.study_mode into normalized_mode
   from public.assessment_runtime_config c
@@ -581,20 +584,32 @@ begin
   if not found then
     raise exception 'assessment runtime configuration is missing';
   end if;
-  token_digest := extensions.digest(p_access_token, 'sha256');
+  provided_digest := extensions.digest(p_access_code, 'sha256');
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(p_participant_id || ':' || p_session_number::text, 0)
   );
+  select e.access_code_digest, e.study_mode
+  into enrollment_digest, enrollment_mode
+  from public.assessment_enrollments e
+  where e.participant_id = p_participant_id
+    and e.session_number = p_session_number
+    and e.active is true
+    and e.study_mode = normalized_mode;
+  if not found or enrollment_digest is distinct from provided_digest then
+    raise exception 'assessment credentials are invalid';
+  end if;
   select pg_catalog.count(*)::integer into eligible_video_count
   from public.videos v
   where (normalized_mode = 'dev' and v.is_test is true)
     or (normalized_mode = 'formal' and v.is_test is false and v.session_pool = p_session_number);
-  select access_token_digest into stored_digest
-  from public.assessment_session_access
-  where participant_id = p_participant_id and session_number = p_session_number;
+  select a.access_code_digest, a.study_mode into stored_digest, stored_mode
+  from public.assessment_session_access a
+  where a.participant_id = p_participant_id
+    and a.session_number = p_session_number;
   if found then
-    if stored_digest is distinct from token_digest then
-      raise exception 'assessment access token is invalid';
+    if stored_digest is distinct from enrollment_digest
+       or stored_mode is distinct from normalized_mode then
+      raise exception 'assessment credentials are invalid';
     end if;
   else
     select pg_catalog.count(*)::integer,
@@ -652,8 +667,18 @@ begin
         raise exception 'legacy queue does not match configured study mode or exact eligible pool';
       end if;
     end if;
-    insert into public.assessment_session_access(participant_id, session_number, access_token_digest)
-    values (p_participant_id, p_session_number, token_digest);
+    insert into public.assessment_session_access(
+      participant_id,
+      session_number,
+      access_code_digest,
+      study_mode
+    )
+    values (
+      p_participant_id,
+      p_session_number,
+      enrollment_digest,
+      normalized_mode
+    );
   end if;
   select pg_catalog.count(*)::integer into existing_queue_length
   from public.assessment_queue
@@ -686,8 +711,8 @@ begin
       )
   ), existing_queue_length + 1) into resolved_next_video_order;
   return query
-  select q.video_id, q.video_order, v.bucket, v.file_path, resolved_next_video_order, existing_queue_length, normalized_mode
-  from public.assessment_queue q join public.videos v on v.video_id = q.video_id
+  select q.video_id, q.video_order, resolved_next_video_order, existing_queue_length, normalized_mode
+  from public.assessment_queue q
   where q.participant_id = p_participant_id and q.session_number = p_session_number
   order by q.video_order;
 end;
@@ -696,6 +721,19 @@ $$;
 -- The old nine-argument function remains an owner-only internal writer.
 revoke all on function public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb)
   from public, anon, authenticated;
+
+drop function if exists public.submit_video_response(
+  text,
+  integer,
+  text,
+  integer,
+  boolean,
+  bigint,
+  bigint,
+  boolean,
+  jsonb,
+  text
+);
 
 create or replace function public.submit_video_response(
   p_participant_id text,
@@ -707,14 +745,17 @@ create or replace function public.submit_video_response(
   p_no_response_latency_ms bigint,
   p_video_completed boolean,
   p_clicks jsonb,
-  p_access_token text
+  p_access_code text
 )
 returns void
 language plpgsql security definer set search_path = ''
 as $$
 declare
-  token_digest bytea;
+  provided_digest bytea;
+  enrollment_digest bytea;
   stored_digest bytea;
+  normalized_mode text;
+  stored_mode text;
   has_lesion boolean;
   onset_sec double precision;
   first_time double precision;
@@ -728,7 +769,7 @@ declare
 begin
   if pg_catalog.length(pg_catalog.btrim(coalesce(p_participant_id, ''))) = 0 then raise exception 'participant_id is required'; end if;
   if p_session_number is null or p_session_number not between 1 and 3 then raise exception 'session_number must be 1, 2, or 3'; end if;
-  if pg_catalog.length(coalesce(p_access_token, '')) < 32 then raise exception 'assessment access token is invalid'; end if;
+  if pg_catalog.length(coalesce(p_access_code, '')) < 20 then raise exception 'assessment credentials are invalid'; end if;
   if p_video_order is null or p_video_order < 1 then raise exception 'video_order must be positive'; end if;
   if p_answer is null then raise exception 'answer is required'; end if;
   if p_video_completed is distinct from true then raise exception 'video must be completed before submission'; end if;
@@ -736,11 +777,30 @@ begin
   if p_answer and p_no_response_latency_ms is not null then raise exception 'positive responses cannot have no_response_latency_ms'; end if;
   if not p_answer and (p_no_response_latency_ms is null or p_no_response_latency_ms < 0) then raise exception 'negative responses require no_response_latency_ms'; end if;
   if p_clicks is null or pg_catalog.jsonb_typeof(p_clicks) <> 'array' then raise exception 'p_clicks must be a JSON array'; end if;
-  token_digest := extensions.digest(p_access_token, 'sha256');
+  select c.study_mode into normalized_mode
+  from public.assessment_runtime_config c
+  where c.id = 1;
+  if not found then raise exception 'assessment runtime configuration is missing'; end if;
+  provided_digest := extensions.digest(p_access_code, 'sha256');
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_participant_id || ':' || p_session_number::text, 0));
-  select access_token_digest into stored_digest from public.assessment_session_access
-  where participant_id = p_participant_id and session_number = p_session_number;
-  if not found or stored_digest is distinct from token_digest then raise exception 'assessment access token is invalid'; end if;
+  select e.access_code_digest into enrollment_digest
+  from public.assessment_enrollments e
+  where e.participant_id = p_participant_id
+    and e.session_number = p_session_number
+    and e.active is true
+    and e.study_mode = normalized_mode;
+  if not found or enrollment_digest is distinct from provided_digest then
+    raise exception 'assessment credentials are invalid';
+  end if;
+  select a.access_code_digest, a.study_mode into stored_digest, stored_mode
+  from public.assessment_session_access a
+  where a.participant_id = p_participant_id
+    and a.session_number = p_session_number;
+  if not found
+     or stored_digest is distinct from enrollment_digest
+     or stored_mode is distinct from normalized_mode then
+    raise exception 'assessment credentials are invalid';
+  end if;
   select v.has_lesion, v.lesion_onset_sec into has_lesion, onset_sec
   from public.assessment_queue q join public.videos v on v.video_id = q.video_id
   where q.participant_id = p_participant_id and q.session_number = p_session_number
@@ -798,7 +858,95 @@ begin
 end;
 $$;
 
+create or replace function public.authorize_current_assessment_video(
+  p_participant_id text,
+  p_session_number integer,
+  p_video_order integer,
+  p_access_code text
+)
+returns table (
+  bucket text,
+  file_path text
+)
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  provided_digest bytea;
+  enrollment_digest bytea;
+  stored_digest bytea;
+  normalized_mode text;
+  stored_mode text;
+  current_video_order integer;
+begin
+  if pg_catalog.length(pg_catalog.btrim(coalesce(p_participant_id, ''))) = 0
+     or p_session_number is null
+     or p_session_number not between 1 and 3
+     or pg_catalog.length(coalesce(p_access_code, '')) < 20 then
+    raise exception 'assessment credentials are invalid';
+  end if;
+  select c.study_mode into normalized_mode
+  from public.assessment_runtime_config c
+  where c.id = 1;
+  if not found then raise exception 'assessment runtime configuration is missing'; end if;
+  provided_digest := extensions.digest(p_access_code, 'sha256');
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_participant_id || ':' || p_session_number::text, 0)
+  );
+  select e.access_code_digest into enrollment_digest
+  from public.assessment_enrollments e
+  where e.participant_id = p_participant_id
+    and e.session_number = p_session_number
+    and e.active is true
+    and e.study_mode = normalized_mode;
+  if not found or enrollment_digest is distinct from provided_digest then
+    raise exception 'assessment credentials are invalid';
+  end if;
+  select a.access_code_digest, a.study_mode into stored_digest, stored_mode
+  from public.assessment_session_access a
+  where a.participant_id = p_participant_id
+    and a.session_number = p_session_number;
+  if not found
+     or stored_digest is distinct from enrollment_digest
+     or stored_mode is distinct from normalized_mode then
+    raise exception 'assessment credentials are invalid';
+  end if;
+  select pg_catalog.min(q.video_order)
+  into current_video_order
+  from public.assessment_queue q
+  where q.participant_id = p_participant_id
+    and q.session_number = p_session_number
+    and not exists (
+      select 1
+      from public.responses r
+      where r.participant_id = q.participant_id
+        and r.session_number = q.session_number
+        and r.video_id = q.video_id
+        and r.video_order = q.video_order
+    );
+  if current_video_order is null or p_video_order <> current_video_order then
+    raise exception 'assessment video is not available';
+  end if;
+  return query
+  select v.bucket, v.file_path
+  from public.assessment_queue q
+  join public.videos v on v.video_id = q.video_id
+  where q.participant_id = p_participant_id
+    and q.session_number = p_session_number
+    and q.video_order = p_video_order;
+  if not found then raise exception 'assessment video is not available'; end if;
+end;
+$$;
+
 revoke all on function public.start_or_resume_assessment(text, integer, text) from public, authenticated;
 grant execute on function public.start_or_resume_assessment(text, integer, text) to anon;
 revoke all on function public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb, text) from public, authenticated;
 grant execute on function public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb, text) to anon;
+revoke all on function public.authorize_current_assessment_video(text, integer, integer, text) from public, anon, authenticated;
+grant execute on function public.authorize_current_assessment_video(text, integer, integer, text) to service_role;
+
+comment on function public.start_or_resume_assessment(text, integer, text)
+is 'SECURITY DEFINER is intentional: a coordinator-provisioned access code and authoritative mode bind server-owned queue creation and resume data.';
+comment on function public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb, text)
+is 'SECURITY DEFINER is intentional: active enrollment, bound mode, first-unanswered-order checks, and exact idempotent replay protect the atomic response boundary.';
+comment on function public.authorize_current_assessment_video(text, integer, integer, text)
+is 'SECURITY DEFINER is service-role-only: it releases one current private Storage object after enrollment, mode, binding, and progress checks.';

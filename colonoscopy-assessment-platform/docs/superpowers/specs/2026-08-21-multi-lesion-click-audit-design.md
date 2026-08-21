@@ -169,41 +169,57 @@ The frontend does not send generated IDs or timestamps.
 - Revoke all table and identity-sequence privileges on `responses` and `lesion_detection_events` from `PUBLIC`, `anon`, and `authenticated`; do not create anonymous insert, select, update, or delete policies for either table.
 - Use only the trusted `SECURITY DEFINER` RPC to validate queue identity and derive server-owned fields before writing either table.
 - Revoke RPC execution from `PUBLIC` and `authenticated`, then grant it to `anon` only.
-- Keep private Supabase Storage and signed URL behavior unchanged.
+- Keep the Storage bucket private and remove every anonymous `storage.objects`
+  `SELECT` policy. The browser cannot list, sign, or download assessment objects
+  directly.
+- Release the current object's `bucket` and `file_path` only through a
+  service-role-only authorization RPC. A trusted Edge Function uses that result
+  to create the temporary signed URL without exposing the service key.
 - Run Supabase security and performance advisors after applying the migration.
 
 ## Session and Queue Boundary
 
-The browser creates one high-entropy access token for each
-`participant_id` + `session_number` and retains it only in that browser. The
-database stores only its SHA-256 digest in `assessment_session_access`; no
-browser role can read the table or recover the token. A first start creates the
-binding and a server-owned randomized queue. An existing legacy
-queue may be claimed once only after it is proven identical to the authoritative
-eligible pool for the protected runtime mode. Validation checks both set
-directions, equal cardinality, unique contiguous `video_order` values from
-`1..N`, and exactly 40 eligible and queued videos in FORMAL mode. A queue row
-whose `video_id` has no matching `videos` record is invalid. The mode is stored
-in the single-row
-`assessment_runtime_config` table, defaults to `dev` without overwriting an
-existing value, and is not supplied by the browser.
+Before a participant starts, a coordinator creates one protected
+`assessment_enrollments` row for each `participant_id` + `session_number`.
+It stores only a SHA-256 digest of a high-entropy access code, an active flag,
+and the authorized `study_mode`. Browser roles cannot read this table. The
+entered code must contain at least 20 characters, match an active enrollment,
+and have the same mode as the single authoritative
+`assessment_runtime_config` row. Missing, inactive, wrong-code, and wrong-mode
+enrollments all return the same generic credential error.
 
-`start_or_resume_assessment(participant_id, session_number, access_token)` is
-the only browser-accessible queue API. It acquires a
-participant/session advisory transaction lock, validates or creates the token
-binding, reads the authoritative mode, applies the existing DEV/FORMAL pool
-rules, creates a queue only when absent, and returns only `video_id`,
-`video_order`, `bucket`, `file_path`, `next_video_order`, `queue_length`, and
-the authoritative `study_mode`. It never returns `has_lesion` or
-`lesion_onset_sec`.
+`assessment_session_access` stores the matched enrollment digest and the
+session's mode. A composite foreign key binds that state to the enrollment and
+prevents a mode or code change from silently relabeling an active session.
+Legacy browser-generated bindings are retained only when they already match an
+explicit enrollment; unmatched bindings are removed while queues and responses
+remain intact. A legacy queue cannot resume until the coordinator provisions an
+enrollment. After provisioning, the queue must still be proven identical to the
+authoritative eligible pool: both set directions, equal cardinality, unique
+contiguous `video_order` values from `1..N`, no missing video reference, and
+exactly 40 eligible and queued videos in FORMAL mode.
+
+`start_or_resume_assessment(participant_id, session_number, access_code)` is the
+only browser-accessible queue API. It acquires a participant/session advisory
+transaction lock, validates the enrollment and mode, creates the bound access
+row and randomized queue only when permitted, and returns only `video_id`,
+`video_order`, `next_video_order`, `queue_length`, and authoritative
+`study_mode`. It never returns Storage paths, lesion truth, or lesion onset.
+
+`authorize_current_assessment_video(participant_id, session_number,
+video_order, access_code)` is executable only by `service_role`. It repeats the
+enrollment, mode, and binding checks, then returns exactly one `bucket` and
+`file_path` only when `video_order` is the first unanswered queue order.
+Completed, previous, skipped, future, wrong-mode, and wrong-code requests fail.
+The Edge Function signs only that object. Anonymous Storage listing and signing
+are unavailable because the former global helper and anonymous Storage policy
+are removed.
 
 Anonymous clients have no direct privileges or policies on `videos`,
-`assessment_queue`, `responses`, `lesion_detection_events`, or the access
-table. The legacy `get_next_video_order` RPC is no longer browser-callable.
-A narrow SECURITY DEFINER Storage predicate confirms a signed object is a
-configured video without granting metadata reads.
+`assessment_queue`, `responses`, `lesion_detection_events`, enrollments, or the
+access table. The legacy `get_next_video_order` RPC is not browser-callable.
 
-The token-bound submission RPC holds the same advisory lock. A new submission
+The access-code-bound submission RPC holds the same advisory lock. A new submission
 must be the first unanswered queue order. Before that check, an exactly
 matching already-committed response and complete derived click-event set is
 treated as success, so a lost HTTP acknowledgement can be retried safely. A
@@ -230,6 +246,13 @@ SurveyJS remains the final-classification model and validation boundary. React o
 
 Automated tests cover:
 
+- active coordinator enrollment, minimum access-code length, generic credential
+  errors, and authoritative mode agreement;
+- safe legacy access-binding cleanup before digest/mode constraints;
+- browser queue metadata excludes Storage paths;
+- service-role-only current-video authorization rejects completed, previous,
+  skipped, and future orders;
+- anonymous Storage policies and the global object predicate are absent;
 - repeated click accumulation and millisecond precision;
 - signed and null detection latency behavior;
 - `Next video` enablement only after valid end and at least one click;
