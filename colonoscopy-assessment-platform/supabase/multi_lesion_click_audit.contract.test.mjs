@@ -127,6 +127,62 @@ test("binds queue creation, resume, and submission to a private session token", 
   );
 });
 
+test("claims a legacy queue only when it exactly matches the eligible pool and order", async () => {
+  const sources = await Promise.all(
+    [
+      new URL("./schema.sql", import.meta.url),
+      new URL("./session_access_hardening.sql", import.meta.url)
+    ].map(async (file) => ({
+      name: file.pathname,
+      sql: await readFile(file, "utf8")
+    }))
+  );
+
+  for (const { name, sql } of sources) {
+    assert.match(sql, /legacy_distinct_video_count integer;/i, name);
+    assert.match(sql, /legacy_distinct_order_count integer;/i, name);
+    assert.match(sql, /legacy_min_video_order integer;/i, name);
+    assert.match(sql, /legacy_max_video_order integer;/i, name);
+    assert.match(
+      sql,
+      /from public\.assessment_queue q\s+left join public\.videos v on v\.video_id = q\.video_id[\s\S]*?v\.video_id is null[\s\S]*?into queue_is_eligible_set;/i,
+      name
+    );
+    assert.match(
+      sql,
+      /from public\.videos v[\s\S]*?not exists \(\s*select 1\s+from public\.assessment_queue q[\s\S]*?\)\s*\)\s*into eligible_pool_is_queued;/i,
+      name
+    );
+    assert.match(sql, /existing_queue_length = eligible_video_count/i, name);
+    assert.match(
+      sql,
+      /legacy_distinct_video_count = existing_queue_length/i,
+      name
+    );
+    assert.match(
+      sql,
+      /legacy_distinct_order_count = existing_queue_length/i,
+      name
+    );
+    assert.match(sql, /legacy_min_video_order = 1/i, name);
+    assert.match(
+      sql,
+      /legacy_max_video_order = existing_queue_length/i,
+      name
+    );
+    assert.match(
+      sql,
+      /normalized_mode <> 'formal'\s+or eligible_video_count = 40/i,
+      name
+    );
+    assert.match(
+      sql,
+      /queue_is_eligible_set\s+and eligible_pool_is_queued/i,
+      name
+    );
+  }
+});
+
 test("removes anonymous table reads and makes token-bound submissions ordered and idempotent", async () => {
   const sources = await Promise.all(
     [

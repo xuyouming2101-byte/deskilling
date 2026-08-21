@@ -178,9 +178,13 @@ The browser creates one high-entropy access token for each
 `participant_id` + `session_number` and retains it only in that browser. The
 database stores only its SHA-256 digest in `assessment_session_access`; no
 browser role can read the table or recover the token. A first start creates the
-binding and a server-owned randomized queue. An existing legacy development
-queue may be claimed once only after every queued video is verified against the
-protected runtime mode. The mode is stored in the single-row
+binding and a server-owned randomized queue. An existing legacy
+queue may be claimed once only after it is proven identical to the authoritative
+eligible pool for the protected runtime mode. Validation checks both set
+directions, equal cardinality, unique contiguous `video_order` values from
+`1..N`, and exactly 40 eligible and queued videos in FORMAL mode. A queue row
+whose `video_id` has no matching `videos` record is invalid. The mode is stored
+in the single-row
 `assessment_runtime_config` table, defaults to `dev` without overwriting an
 existing value, and is not supplied by the browser.
 

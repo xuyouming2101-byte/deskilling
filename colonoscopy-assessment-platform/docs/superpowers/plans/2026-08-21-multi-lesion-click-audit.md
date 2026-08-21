@@ -1391,8 +1391,12 @@ git commit -m "docs: explain auditable lesion response workflow"
 - [x] Store only a SHA-256 token digest in `assessment_session_access`; revoke all
   browser-role table access.
 - [x] Move persistent queue creation and resume into a locked SECURITY DEFINER RPC
-  that reads protected runtime mode, validates legacy queues against that mode,
-  and returns no lesion truth or onset metadata.
+  that reads protected runtime mode and returns no lesion truth or onset
+  metadata.
+- [x] Before binding a legacy queue, require bidirectional set equality with the
+  authoritative eligible pool, matching cardinality, FORMAL cardinality of 40,
+  unique contiguous `video_order` values from `1..N`, and no missing video
+  references.
 - [x] Revoke anonymous `videos`, `assessment_queue`, and `get_next_video_order`
   access while preserving private Storage signed URL validation through a narrow
   SECURITY DEFINER predicate.

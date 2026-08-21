@@ -557,6 +557,12 @@ declare
   normalized_mode text;
   existing_queue_length integer;
   legacy_queue_matches_mode boolean;
+  legacy_distinct_video_count integer;
+  legacy_distinct_order_count integer;
+  legacy_min_video_order integer;
+  legacy_max_video_order integer;
+  queue_is_eligible_set boolean;
+  eligible_pool_is_queued boolean;
   eligible_video_count integer;
   resolved_next_video_order integer;
 begin
@@ -579,6 +585,10 @@ begin
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(p_participant_id || ':' || p_session_number::text, 0)
   );
+  select pg_catalog.count(*)::integer into eligible_video_count
+  from public.videos v
+  where (normalized_mode = 'dev' and v.is_test is true)
+    or (normalized_mode = 'formal' and v.is_test is false and v.session_pool = p_session_number);
   select access_token_digest into stored_digest
   from public.assessment_session_access
   where participant_id = p_participant_id and session_number = p_session_number;
@@ -587,25 +597,59 @@ begin
       raise exception 'assessment access token is invalid';
     end if;
   else
-    select pg_catalog.count(*)::integer into existing_queue_length
-    from public.assessment_queue
-    where participant_id = p_participant_id and session_number = p_session_number;
+    select pg_catalog.count(*)::integer,
+      pg_catalog.count(distinct q.video_id)::integer,
+      pg_catalog.count(distinct q.video_order)::integer,
+      pg_catalog.min(q.video_order), pg_catalog.max(q.video_order)
+    into existing_queue_length, legacy_distinct_video_count,
+      legacy_distinct_order_count, legacy_min_video_order,
+      legacy_max_video_order
+    from public.assessment_queue q
+    where q.participant_id = p_participant_id and q.session_number = p_session_number;
     if existing_queue_length > 0 then
       select not exists (
         select 1
         from public.assessment_queue q
-        join public.videos v on v.video_id = q.video_id
+        left join public.videos v on v.video_id = q.video_id
         where q.participant_id = p_participant_id
           and q.session_number = p_session_number
           and (
-            case
-              when normalized_mode = 'dev' then v.is_test is true
-              else v.is_test is false and v.session_pool = p_session_number
-            end
-          ) is not true
-      ) into legacy_queue_matches_mode;
+            v.video_id is null
+            or (
+              case
+                when normalized_mode = 'dev' then v.is_test is true
+                else v.is_test is false and v.session_pool = p_session_number
+              end
+            ) is not true
+          )
+      ) into queue_is_eligible_set;
+      select not exists (
+        select 1
+        from public.videos v
+        where ((normalized_mode = 'dev' and v.is_test is true)
+          or (normalized_mode = 'formal' and v.is_test is false and v.session_pool = p_session_number))
+          and not exists (
+            select 1
+            from public.assessment_queue q
+            where q.participant_id = p_participant_id
+              and q.session_number = p_session_number
+              and q.video_id = v.video_id
+          )
+      ) into eligible_pool_is_queued;
+      legacy_queue_matches_mode :=
+        queue_is_eligible_set
+        and eligible_pool_is_queued
+        and existing_queue_length = eligible_video_count
+        and legacy_distinct_video_count = existing_queue_length
+        and legacy_distinct_order_count = existing_queue_length
+        and legacy_min_video_order = 1
+        and legacy_max_video_order = existing_queue_length
+        and (
+          normalized_mode <> 'formal'
+          or eligible_video_count = 40
+        );
       if legacy_queue_matches_mode is not true then
-        raise exception 'legacy queue does not match configured study mode';
+        raise exception 'legacy queue does not match configured study mode or exact eligible pool';
       end if;
     end if;
     insert into public.assessment_session_access(participant_id, session_number, access_token_digest)
@@ -615,10 +659,6 @@ begin
   from public.assessment_queue
   where participant_id = p_participant_id and session_number = p_session_number;
   if existing_queue_length = 0 then
-    select pg_catalog.count(*)::integer into eligible_video_count
-    from public.videos v
-    where (normalized_mode = 'dev' and v.is_test is true)
-      or (normalized_mode = 'formal' and v.is_test is false and v.session_pool = p_session_number);
     if normalized_mode = 'formal' and eligible_video_count <> 40 then
       raise exception using message = pg_catalog.format(
         'Session %s is not ready: %s/40 formal videos configured.', p_session_number, eligible_video_count
