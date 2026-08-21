@@ -173,6 +173,8 @@ drop policy if exists "Allow anonymous V001 video reads"
   on storage.objects;
 drop policy if exists "Allow anonymous signed URL reads for video objects"
   on storage.objects;
+drop policy if exists "Allow read access to SSL videos 1rl8_0"
+  on storage.objects;
 
 revoke all on function public.can_read_assessment_video_object(text, text)
   from public, anon, authenticated, service_role;

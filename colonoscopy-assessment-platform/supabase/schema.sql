@@ -473,6 +473,8 @@ drop policy if exists "Allow anonymous V001 video reads"
 
 drop policy if exists "Allow anonymous signed URL reads for video objects"
   on storage.objects;
+drop policy if exists "Allow read access to SSL videos 1rl8_0"
+  on storage.objects;
 
 -- Canonical fresh-install form of assessment_enrollment_hardening.sql.
 
@@ -537,6 +539,7 @@ drop policy if exists "Allow anonymous read of video metadata" on public.videos;
 revoke all on function public.get_next_video_order(text, integer) from public, anon, authenticated;
 
 drop policy if exists "Allow anonymous signed URL reads for video objects" on storage.objects;
+drop policy if exists "Allow read access to SSL videos 1rl8_0" on storage.objects;
 drop function if exists public.can_read_assessment_video_object(text, text);
 
 drop function if exists public.start_or_resume_assessment(text, integer, text, text);

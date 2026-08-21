@@ -436,6 +436,11 @@ test("removes anonymous Storage reads and the global video-object helper", async
     );
     assert.match(
       sql,
+      /drop policy if exists "Allow read access to SSL videos 1rl8_0"\s+on storage\.objects;/i,
+      name
+    );
+    assert.match(
+      sql,
       /drop function if exists public\.can_read_assessment_video_object\(text, text\);/i,
       name
     );
