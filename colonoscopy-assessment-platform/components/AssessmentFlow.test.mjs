@@ -76,7 +76,16 @@ test("captures ended time and repeated click indexes through refs before state",
   ]);
 
   const detectBody = getFunctionBody(assessmentClientSource, "handleDetect");
-  assert.match(detectBody, /const nowMs = performance\.now\(\);/);
+  assertLexicalOrder(detectBody, [
+    "const videoTimeSec = captureVideoTimeAtClick(videoRef.current);",
+    "const nowMs = performance.now();",
+    "const click = createLesionDetectionClick({"
+  ]);
+  assert.match(detectBody, /videoTimeSec,\s*nowMs,/);
+  assert.equal(
+    detectBody.match(/captureVideoTimeAtClick\(videoRef\.current\)/g)?.length,
+    1
+  );
   assertLexicalOrder(detectBody, [
     "clickIndex: detectionClicksRef.current.length + 1",
     "detectionClicksRef.current = nextClicks;",

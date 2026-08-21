@@ -188,10 +188,11 @@ export default function AssessmentClient() {
       return;
     }
 
+    const videoTimeSec = captureVideoTimeAtClick(videoRef.current);
     const nowMs = performance.now();
     const click = createLesionDetectionClick({
       clickIndex: detectionClicksRef.current.length + 1,
-      videoTimeSec: captureVideoTimeAtClick(videoRef.current),
+      videoTimeSec,
       nowMs,
       playbackStartedAtMs,
       lesionOnsetSec: currentVideo.lesionOnsetSec
