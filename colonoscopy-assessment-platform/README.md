@@ -239,3 +239,10 @@ runtime by a trusted Edge Function after the service-role-only current-video
 RPC authorizes the first unanswered queue order. Supabase Storage then creates a
 temporary signed URL for that single `bucket/file_path`; the browser cannot sign
 the queue itself.
+
+## Production deployment
+
+For the Ubuntu 22.04 Alibaba Cloud ECS deployment using PM2 and Nginx, see
+[`docs/alibaba-ecs-deployment.md`](docs/alibaba-ecs-deployment.md). This
+deployment keeps the existing Supabase database, RPC, Edge Function, and private
+Storage architecture unchanged.
