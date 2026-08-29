@@ -1,191 +1,901 @@
-# Local and Online Authentication and Video Delivery Design
+# Local and Online Authentication, Attempts, and Video Delivery Design
 
 Date: 2026-08-29
 
-Status: Final design for approval. No implementation is included in this
-document.
+Status: Revised final design for approval. This document contains no
+application implementation and authorizes no database migration.
 
 ## 1. Decision summary
 
 The project remains one Next.js codebase with two independently operated
-deployment environments:
+environments:
 
-| Environment | Git branch | Runtime | Participant identity | Video source | Study data |
+| Environment | Git branch | Runtime | Participant identity | Video source | Active-attempt persistence |
 | --- | --- | --- | --- | --- | --- |
-| LOCAL | `main` | Mac, loopback-only | Participant ID and session only; no password or access code | Files outside Git, streamed through Next.js | Existing Supabase project |
-| ONLINE | `release` | Alibaba Cloud ECS | Supabase Auth account entered as participant ID and password | Private Supabase Storage signed URL | Existing Supabase project |
+| LOCAL | `main` | Mac, loopback-only | Participant ID and session only; no password or access code | Files outside Git, streamed through Next.js | Local SQLite, fully offline |
+| ONLINE | `release` | Alibaba Cloud ECS | Supabase Auth using participant ID and participant-specific password | Private Supabase Storage signed URL | Supabase in real time |
 
-The deployment environment and the study mode are separate concepts:
+LOCAL has two roles:
 
-- Deployment environment is `local` or `online` and controls authentication,
-  RPC entry points, and video delivery.
-- Study mode is `dev` or `formal` and controls eligible video selection.
-- A participant never selects either value in the browser.
-- LOCAL supports both DEV and FORMAL by changing trusted database study
-  configuration for the local channel, not by accepting a browser flag.
+1. the primary development and iteration environment; and
+2. a complete, production-capable emergency experimental fallback that can run
+   a new formal session without ECS, Supabase, or Internet connectivity.
 
-There is no fallback between LOCAL and ONLINE. A failure in the selected mode is
-reported as a mode-specific error.
+ONLINE remains the public participant-facing environment. It changes only after
+explicit manual promotion to `release` and manual ECS deployment.
 
-## 2. Current baseline and superseded work
+The canonical experimental hierarchy is now:
 
-The deployed `release` branch at
-`d4957edd455e7f99bc71cbde09c23254edabcfac` uses the existing Study access code
-in the participant UI, queue RPC, response RPC, and private-video Edge Function.
-It must continue to work until an explicitly approved ONLINE release is
-deployed.
+```text
+participant_id
+  -> session_number
+      -> attempt_id
+```
 
-The current working tree also contains an uncommitted access-code-removal
-attempt, including `supabase/remove_assessment_access_code.sql`. That migration
-must not be applied as the final solution. It grants no-auth queue and response
-RPC execution to the anonymous browser, which conflicts with the approved
-ONLINE identity model. During implementation it must be reconciled or replaced,
-not blindly committed or deployed.
+Each attempt is an independent execution unit. It owns one queue, its responses,
+its lesion events, its progress, and its completion state. It has one immutable
+runtime channel, `local` or `online`, and never crosses channels.
 
-The new design preserves these existing behaviors:
+There is no seamless cross-channel continuation. If an ONLINE attempt stops at
+15/40, a replacement LOCAL attempt starts at Video 1 with its own queue. The two
+attempts are never combined into one formal session result.
 
-- DEV and FORMAL video-pool rules, including exactly 40 videos for a FORMAL
-  session;
-- persistent randomized queues;
-- participant and Session 1/2/3 isolation;
-- resume and completion detection;
+## 2. Superseded rules
+
+This revision explicitly supersedes the following rules from the previous
+version of this specification:
+
+- A participant/session may belong permanently to only LOCAL or ONLINE.
+- Cross-channel ownership prevents a replacement attempt.
+- LOCAL requires live Supabase for start, resume, response submission, or video
+  authorization.
+- LOCAL is only a development convenience.
+- A global participant/session queue is the only unit of progress.
+
+The replacement rules are:
+
+- A participant/session may have multiple attempts.
+- Every attempt has one immutable runtime channel.
+- Attempts do not share queue rows, response rows, event rows, or progress.
+- LOCAL active collection is SQLite-authoritative and requires no network.
+- ONLINE active collection is Supabase-authoritative.
+- Cross-channel recovery means creating a new attempt from Video 1, not merging
+  or continuing an old attempt.
+- Raw attempts are retained and formal analysis uses an explicitly selected
+  valid completed attempt.
+
+Any stale cross-channel session-binding language in the earlier design is void.
+
+## 3. Preserved study behavior
+
+Both channels preserve the full assessment semantics:
+
+- participant ID;
+- Sessions 1, 2, and 3;
+- DEV and FORMAL study modes;
+- exactly 40 videos from the requested session pool in FORMAL mode;
+- no formal video reuse across Session 1, 2, and 3 pools;
+- one persisted randomized order per attempt;
+- resume within the same attempt;
 - first-unanswered-order enforcement;
-- duplicate-response and exact-retry protection;
-- response timing and `lesion_detection_events` timing;
-- atomic response and event insertion;
-- private Supabase Storage for ONLINE;
-- existing analysis columns and table identities.
+- no duplicate trial submission;
+- exact retry idempotency;
+- the approved first-play seek restriction and replay behavior;
+- repeated `Lesion detected` marks;
+- pending mark deletion and renumbering;
+- mutually exclusive yes/no classification;
+- no-lesion override semantics;
+- `video_time_at_click`;
+- `response_time_ms`;
+- `detection_latency_ms`, including negative values;
+- `lesion_detection_events` audit semantics;
+- completion and dynamic queue length;
+- the existing response schema and analysis meaning.
 
-## 3. Goals and non-goals
+For first-play behavior, this design adopts one explicit state machine: before
+the first real `ended` event, the participant cannot seek beyond the furthest
+naturally watched point; seeking backward within watched content is allowed.
+After the first `ended` event, free seeking and replay are allowed. This rule
+supersedes any earlier language permitting unrestricted forward seeking during
+the first pass.
+
+## 4. Goals and non-goals
 
 ### Goals
 
-1. Run LOCAL on the Mac with no participant credential while retaining all
-   Supabase queue and result behavior.
-2. Replace the ONLINE Study access code with one Supabase Auth password per
-   participant, shared across Sessions 1, 2, and 3.
-3. Bind every ONLINE study action to the authenticated Supabase user rather
-   than a browser-supplied participant ID.
-4. Deliver LOCAL MP4 files through a controlled, seekable Range endpoint.
-5. Preserve the current ONLINE private-Storage signed URL model.
-6. Change the shared database additively until the public release has completed
-   its rollback window.
+1. Complete a brand-new formal 40-video attempt on the Mac with no network.
+2. Recover that same LOCAL attempt after browser, Next.js, or Mac restart.
+3. Preserve every raw ONLINE and LOCAL attempt without silent deletion.
+4. Synchronize terminal LOCAL attempts into the existing Supabase analysis
+   tables without duplicate or overwritten data.
+5. Replace ONLINE Study access codes with Supabase Auth participant accounts.
+6. Keep private Supabase Storage and current-video authorization ONLINE.
+7. Keep local files outside Git and deliver them with standards-compliant Range
+   streaming.
+8. Keep the current ECS release operational throughout approved development and
+   staged migration work.
 
 ### Non-goals
 
+- No seamless ONLINE-to-LOCAL continuation within one attempt.
+- No merging partial attempts to manufacture one complete session.
+- No automatic background synchronization in the first version.
+- No automatic failover from Supabase persistence to SQLite mid-attempt.
 - No RDS or OSS migration.
-- No local files inside `public/` or Git.
-- No `local_path` database column.
-- No administrator UI, public signup UI, password reset email flow, or Survey
-  Creator.
+- No `local_path` column.
+- No videos in `public/` or Git.
+- No participant self-registration or participant-facing email.
+- No administrator drag-and-drop editor or Survey Creator.
 - No CI/CD, webhook, or automatic deployment.
-- No update to `release` during LOCAL implementation.
-- No deletion or rewriting of existing research or test responses.
+- No change to `release` or the running ECS during this design revision.
 
-## 4. High-level architecture
+## 5. High-level architecture
+
+### 5.1 Final LOCAL architecture
 
 ```text
 LOCAL browser on Mac
-  -> server-rendered runtime mode: local
-  -> Next.js LOCAL assessment routes
-     -> server-only Supabase service client
-     -> LOCAL-only RPC wrappers
-     -> shared private study functions
-     -> videos / assessment_queue / responses / lesion_detection_events
-  -> Next.js LOCAL video Range route
-     -> service-only current-video authorization RPC
-     -> videos.file_path
-     -> LOCAL_VIDEO_ROOT + relative file_path
+  -> server-rendered mode: local
+  -> Next.js LOCAL routes, Node.js runtime, loopback-only
+     -> SQLite attempt database
+        -> assessment_attempts
+        -> assessment_queue
+        -> responses
+        -> lesion_detection_events
+        -> video metadata snapshot
+        -> sync state
+     -> sealed LOCAL study package
+        -> exact DEV/FORMAL metadata and pool assignment
+        -> lesion ground truth
+        -> package/schema version and checksum
+     -> LOCAL_VIDEO_ROOT
+        -> database-authorized relative videos.file_path
+        -> HTTP Range stream
 
+Operator explicitly chooses Sync
+  -> server-only Supabase sync RPC
+  -> attempt-aware Supabase study tables
+  -> conflict or idempotent success
+```
+
+SQLite is authoritative for every final LOCAL attempt, even when Internet is
+available. Connectivity enables explicit synchronization only. This avoids a
+split-brain attempt whose early rows are in Supabase and later rows are local.
+
+### 5.2 ONLINE architecture
+
+```text
 ONLINE browser on ECS
-  -> server-rendered runtime mode: online
-  -> participant ID + password
-  -> Supabase Auth sign-in adapter
-  -> authenticated ONLINE RPC wrappers
-     -> auth.uid() -> private participant account mapping
-     -> shared private study functions
-     -> videos / assessment_queue / responses / lesion_detection_events
-  -> authenticated video Edge Function v2
-     -> validate Supabase user JWT
-     -> service-only current-video authorization RPC
+  -> server-rendered mode: online
+  -> participant ID + participant password
+  -> Supabase Auth account mapping
+  -> authenticated, attempt-aware ONLINE RPCs
+     -> Supabase assessment_attempts
+     -> Supabase assessment_queue
+     -> Supabase responses
+     -> Supabase lesion_detection_events
+  -> authenticated current-video Edge Function
+     -> attempt-aware current-order authorization
      -> private Supabase Storage signed URL
 ```
 
-The browser-facing assessment flow depends on two small interfaces rather than
-embedding provider rules in the player:
+### 5.3 Application boundaries
+
+Shared player and assessment components depend on narrow contracts:
 
 ```ts
-interface AssessmentAccessClient {
-  startOrResume(input: StartInput): Promise<AssessmentSession>;
-  submitResponse(submission: VideoSubmission): Promise<void>;
+interface AssessmentRepository {
+  createOrResumeAttempt(input: StartInput): Promise<AssessmentAttemptSession>;
+  submitResponse(submission: AttemptVideoSubmission): Promise<void>;
+  markAttemptAbandoned(attemptId: string): Promise<void>;
 }
 
 interface VideoAccessGateway {
-  getCurrentVideo(input: CurrentVideoInput): Promise<VideoPlaybackSource>;
+  getCurrentVideo(input: AttemptVideoInput): Promise<VideoPlaybackSource>;
 }
 ```
 
-The LOCAL adapters call controlled Next.js routes. The ONLINE adapters use the
-authenticated Supabase client and authenticated video Edge Function. The player
-receives only a playback URL and does not know whether it is a local stream or a
-Supabase signed URL.
+The LOCAL repository uses SQLite and the local stream route. The ONLINE
+repository uses authenticated Supabase RPCs and the signed-video Edge Function.
+The player receives a playback URL and attempt context; it contains no
+filesystem, Storage, Auth, or sync logic.
 
-## 5. Environment configuration
+## 6. Canonical assessment attempt model
 
-### Shared browser-safe variables
+### 6.1 Supabase model
 
-Both environments require:
+Add `public.assessment_attempts` with at least:
 
-```env
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+```text
+attempt_id uuid primary key
+participant_id text not null
+session_number integer not null check between 1 and 3
+runtime_channel text not null check in ('local', 'online')
+study_mode text not null check in ('dev', 'formal')
+status text not null check in ('in_progress', 'completed', 'abandoned', 'invalid')
+valid_for_analysis boolean not null default false
+replaces_attempt_id uuid null
+started_at timestamptz not null
+completed_at timestamptz null
+synced_at timestamptz null
+sync_state text not null
+sync_payload_sha256 text null
+study_package_checksum text null
+schema_version integer not null
+created_at timestamptz not null
+updated_at timestamptz not null
 ```
 
-These are the only Supabase values exposed to browser JavaScript.
+The additional fields are necessary:
 
-### Server-only deployment selector
-
-Both environments require exactly one server-side value:
-
-```env
-ASSESSMENT_DEPLOYMENT_MODE=local
-```
-
-or:
-
-```env
-ASSESSMENT_DEPLOYMENT_MODE=online
-```
+- `study_mode` freezes the pool-selection meaning of the attempt.
+- `sync_state` distinguishes `never_synced`, `syncing`, `synced`,
+  `sync_failed`, and `conflict`.
+- `sync_payload_sha256` makes a repeated upload comparable and idempotent.
+- `study_package_checksum` preserves LOCAL package provenance.
+- `schema_version` rejects incompatible offline payloads.
+- `updated_at` supports terminal-state and explicit-resolution auditing.
 
 Rules:
 
-- The variable is not prefixed with `NEXT_PUBLIC_`.
-- The Next.js server reads and validates it once.
-- Missing or invalid values fail closed with a configuration error.
-- Mode is not inferred from `NODE_ENV`, hostname, port, branch name, or
-  `localhost`.
-- A Server Component may pass a display-mode value to the client to select the
-  correct form, but that value is not an authorization boundary. Every server
-  route and database function independently enforces its own mode.
-- Editing browser state cannot activate LOCAL endpoints on ECS.
+- New attempt IDs are random UUIDs generated once at the authoritative source:
+  SQLite for LOCAL and PostgreSQL for ONLINE.
+- Add a unique database constraint on
+  `(attempt_id, participant_id, session_number)` so child tables can enforce
+  identity consistency with composite foreign keys.
+- `runtime_channel`, participant ID, session number, study mode, package
+  checksum, and schema version are immutable after attempt creation.
+- `valid_for_analysis = true` requires `status = 'completed'`.
+- At most one attempt per participant/session may be valid for analysis, enforced
+  by a partial unique index on `(participant_id, session_number)` where
+  `valid_for_analysis = true`.
+- `replaces_attempt_id` cannot equal `attempt_id` and must identify an attempt
+  with the same participant ID and session number.
+- A disconnected LOCAL attempt may start with `replaces_attempt_id = null` when
+  the failed ONLINE attempt UUID is not available. Before sync, the operator may
+  set this field once, or the conflict workflow may explicitly link it to a
+  selected incomplete ONLINE attempt. The sync RPC validates the relationship.
+- A replacement relationship does not copy data and does not automatically
+  change validity.
+- ONLINE attempts are server-native and use `sync_state = 'synced'` with
+  `synced_at = null`; `synced_at` is reserved for imported LOCAL data.
+- LOCAL attempts begin `never_synced` in SQLite. Supabase receives their final
+  sync state through the controlled sync transaction.
+
+### 6.2 Status transitions
+
+Allowed first-version transitions are:
+
+```text
+in_progress -> completed
+in_progress -> abandoned
+in_progress -> invalid
+completed   -> invalid      only through explicit operator resolution
+abandoned   -> invalid      only through explicit operator resolution
+```
+
+Completed, abandoned, and invalid attempts are terminal for data collection.
+They cannot resume or accept additional trial rows. A partial LOCAL attempt must
+be marked abandoned or invalid before synchronization; first-version sync does
+not upload a still-editable `in_progress` snapshot.
+
+### 6.3 Analysis validity
+
+Completion does not silently confer analytical validity. A completed attempt is
+a candidate until an authorized operator explicitly designates it.
+
+Use a protected operator function that:
+
+1. takes an advisory lock for participant/session;
+2. verifies the selected attempt is completed;
+3. clears any previously valid attempt only after explicit confirmation;
+4. sets the selected attempt valid;
+5. records operator, timestamp, previous attempt, selected attempt, and reason in
+   a small `assessment_attempt_validity_decisions` audit table.
+
+This audit table stores decisions, not duplicate response data.
+
+## 7. Attempt-aware study table relationships
+
+The existing permanent analysis tables remain canonical. Do not create parallel
+permanent response or event tables.
+
+Add `attempt_id uuid` to:
+
+- `assessment_queue`;
+- `responses`;
+- `lesion_detection_events`.
+
+Final constraints are attempt-scoped:
+
+### `assessment_queue`
+
+- foreign key `(attempt_id, participant_id, session_number)` to the matching
+  attempt identity;
+- unique `(attempt_id, video_order)`;
+- unique `(attempt_id, video_id)`;
+- preserve indexes on participant/session for export and audit queries.
+
+### `responses`
+
+- foreign key `(attempt_id, participant_id, session_number)` to the attempt;
+- composite queue relationship proving that attempt, video ID, and video order
+  identify a real queued trial;
+- unique `(attempt_id, video_order)`;
+- preserve all existing response columns and their meaning.
+
+### `lesion_detection_events`
+
+- foreign key `(attempt_id, participant_id, session_number)` to the attempt;
+- composite queue relationship to the exact queued trial;
+- unique `(attempt_id, video_order, click_index)`;
+- preserve event timing and audit flags exactly.
+
+The final response and event RPCs derive participant/session from the attempt and
+reject payloads whose duplicated identity fields differ. The existing text
+participant/session columns remain for direct analysis/export and backward
+compatibility; `attempt_id` adds execution-unit identity rather than replacing
+those fields.
+
+## 8. Existing uniqueness constraints and live-release compatibility
+
+### 8.1 Current constraint problem
+
+The current schema assumes one attempt per participant/session:
+
+- queue order uniqueness is participant/session/video order;
+- queue video uniqueness is participant/session/video ID;
+- response uniqueness is participant/session/video/video order;
+- lesion click uniqueness is participant/session/video/click index.
+
+Simply adding `attempt_id` while leaving these constraints would block a
+replacement attempt. Simply dropping them would allow the current access-code
+RPCs, which query only participant/session, to mix multiple attempts.
+
+Therefore attempt support requires a staged compatibility bridge. It cannot be
+enabled by a one-step constraint rewrite while ECS still uses the legacy API.
+
+### 8.2 Deterministic legacy attempt backfill
+
+For every distinct participant/session present in the union of queue, response,
+and event tables, create exactly one legacy ONLINE attempt. Historical attempts
+are classified `online` because their execution depended on live Supabase data
+and private Supabase Storage, regardless of whether the browser happened to run
+on localhost or ECS.
+
+Use UUIDv5 with one fixed migration namespace and the exact value:
+
+```text
+participant_id + unit-separator + session_number
+```
+
+This makes reruns resolve to the same UUID. The migration must preflight the
+`uuid-ossp` extension or provide an independently tested equivalent UUIDv5
+function; it must not use unstable row order or a newly generated UUID on every
+run.
+
+Backfill derivation:
+
+- `started_at`: earliest queue `created_at`, otherwise earliest child timestamp;
+- `created_at`: same preserved earliest source timestamp where available;
+- `completed`: only when every queued order has a response;
+- otherwise `in_progress`, never silently `abandoned`;
+- `completed_at`: latest response timestamp only for a complete attempt;
+- `valid_for_analysis`: false until explicit operator review;
+- `study_mode`: historical access/session binding where available; otherwise an
+  exact eligible-pool comparison that must have one unambiguous match;
+- `sync_state`: `synced` because the data already reside in Supabase;
+- `synced_at`: null because no LOCAL import occurred.
+
+If orphan rows, ambiguous mode, duplicate queue orders, or inconsistent child
+identity prevent a lossless mapping, migration stops and reports the exact rows.
+It never deletes or silently repairs them.
+
+### 8.3 Compatibility bridge for the current ECS release
+
+The current ECS release at
+`d4957edd455e7f99bc71cbde09c23254edabcfac` calls the existing access-code RPC
+signatures and current video Edge Function. To preserve it:
+
+1. Add nullable `attempt_id` columns and the attempt table additively.
+2. Backfill legacy attempt IDs.
+3. Add `attempt_id` to the historical session-access binding so each old
+   participant/session access code resolves one legacy ONLINE attempt.
+4. Replace the bodies, but not names, signatures, return shapes, credential
+   behavior, or error contract, of the existing access-code start, submit, and
+   video-authorization RPCs.
+5. Scope every old-function queue, response, event, and progress query to its
+   bound legacy attempt.
+6. Keep the old Edge Function contract unchanged during this compatibility
+   period.
+7. Add a defensive insert trigger that fills a null `attempt_id` only from one
+   unambiguous historical access binding; reject ambiguous inserts.
+
+The bridge must be deployed and real-browser tested against the unchanged ECS
+release before old participant/session uniqueness constraints are removed.
+
+### 8.4 Constraint transition
+
+Use these stages:
+
+**Stage A - additive only**
+
+- Create attempts and nullable attempt columns.
+- Backfill and validate.
+- Create attempt-aware unique indexes where they do not conflict.
+- Keep all old unique indexes.
+- Do not create a second Supabase attempt for an existing participant/session.
+
+**Stage B - legacy API bridge**
+
+- Make old RPC implementations attempt-aware behind unchanged signatures.
+- Bind each historical access record to its legacy attempt.
+- Test queue creation, resume, signed video, response submission, and completion
+  from the unchanged ECS release.
+- Keep dedicated LOCAL development participant IDs separate from active ONLINE
+  records.
+
+**Stage C - activate multiple attempts**
+
+- Enter a controlled migration window.
+- Recheck counts, duplicates, null attempt IDs, and bridge behavior.
+- Drop the old participant/session unique indexes.
+- Activate the attempt-aware unique constraints.
+- Set child `attempt_id` columns not null only after every row is backfilled.
+- Keep the old access-code API bridge operational for rollback.
+
+After Stage C, the old ECS release still sees only its access-bound legacy
+attempt because its RPC bodies are attempt-scoped. It does not see replacement
+LOCAL attempts.
+
+**Stage D - delayed access-code cleanup**
+
+- Occurs only after the new ONLINE Auth release and a separately approved
+  rollback window.
+- Revoke and remove old access-code RPC signatures, the old Edge Function, and
+  obsolete access tables.
+- Do not drop attempts or any queue, response, or event row.
+
+No shared Supabase stage is executed merely because this design is committed.
+Every stage requires a live-schema audit and separate approval.
+
+## 9. LOCAL SQLite database
+
+### 9.1 Authority and durability
+
+The final LOCAL application uses one server-side SQLite database outside Git.
+The browser never opens SQLite directly. All LOCAL assessment operations run in
+Next.js Node.js Route Handlers or server modules.
+
+Configure SQLite with:
+
+- foreign keys enabled;
+- WAL journaling;
+- a non-zero busy timeout;
+- `synchronous = FULL` for formal collection;
+- transactions for attempt creation, queue creation, response/event commit, and
+  status changes;
+- schema migrations keyed by an integer schema version;
+- an integrity check before formal use and before sync export.
+
+The database file and WAL files live in an operator-controlled data directory
+outside the repository. They survive browser refresh, browser close, Next.js
+restart, Mac sleep, and Mac restart.
+
+### 9.2 Minimum local schema
+
+SQLite mirrors the canonical concepts rather than copying the entire Supabase
+platform schema:
+
+- `local_assessment_attempts`;
+- `local_assessment_queue`;
+- `local_responses`;
+- `local_lesion_detection_events`;
+- `local_video_metadata_snapshot`;
+- `local_study_packages`;
+- `local_sync_log`;
+- `local_schema_migrations`.
+
+Required state includes attempt metadata, participant/session, channel, study
+mode, randomized queue, all response fields, all event fields, completion,
+sync state, exact video metadata snapshot, formal session pools, lesion ground
+truth, package checksum, and schema version.
+
+SQLite uses the same attempt-scoped uniqueness rules as final Supabase. IDs and
+timestamps are generated once and preserved during sync. Store timestamps as
+UTC ISO-8601 values with millisecond precision. Store media time with the same
+millisecond precision used by current responses/events.
+
+Only the UUID `attempt_id` is shared as a locally generated canonical identifier.
+SQLite may use private local row IDs internally, but it never sends those values
+as `responses.id`, `assessment_queue.id`, or `lesion_detection_events.id`.
+PostgreSQL continues generating those bigint identity columns; attempt-scoped
+natural keys match imported child rows idempotently.
+
+### 9.3 LOCAL attempt lifecycle
+
+1. Validate the selected study package before allowing a formal start.
+2. Create a UUID and `in_progress` LOCAL attempt in one transaction.
+3. Select the exact eligible pool from the local metadata snapshot.
+4. Randomize the pool once using a versioned, tested shuffle implementation.
+5. Persist every queue row before presenting Video 1.
+6. Resume only by `attempt_id`; participant/session alone may return multiple
+   attempts and cannot choose silently.
+7. Commit events and the final response atomically for each video.
+8. Advance only after the SQLite transaction succeeds.
+9. Mark completed only when every persisted queue order has one response.
+10. Keep abandoned and invalid attempts read-only and auditable.
+
+Closing or restarting the app resumes the same selected LOCAL attempt. It never
+creates a replacement automatically.
+
+## 10. LOCAL study package
+
+### 10.1 Package contents
+
+Before formal offline use, prepare and validate a sealed LOCAL study package
+while connectivity is available. It contains:
+
+- references to all required MP4 files under `LOCAL_VIDEO_ROOT`;
+- exact `video_id` and relative `videos.file_path`;
+- `has_lesion` and `lesion_onset_sec`;
+- `is_test` and formal `session_pool` assignment;
+- DEV/FORMAL configuration needed by the local app;
+- package format version and minimum compatible SQLite schema version;
+- a canonical manifest checksum;
+- per-video file size and SHA-256 checksum for formal packages.
+
+The package manifest is read-only during collection. The attempt stores its
+package checksum and a copy of the required metadata snapshot so later changes
+to a package cannot change an existing attempt's meaning.
+
+### 10.2 Formal validation
+
+The operator validation command must prove before formal use:
+
+- Session 1 has exactly 40 non-test videos assigned to pool 1;
+- Session 2 has exactly 40 different non-test videos assigned to pool 2;
+- Session 3 has exactly 40 different non-test videos assigned to pool 3;
+- all 120 formal video IDs and file paths are unique across pools;
+- every file exists and is a regular readable MP4;
+- every file size and SHA-256 matches the manifest;
+- all required lesion metadata are present and valid;
+- the package and SQLite schema versions are compatible.
+
+Failure blocks formal attempt creation with an operator-readable package error.
+It never falls back to live Supabase metadata.
+
+The package may reference videos in their existing location. This design does
+not require relocation. When implementation reaches this phase, the operator
+must explicitly configure and validate `LOCAL_VIDEO_ROOT` and the package
+manifest path.
+
+### 10.3 Package registry at synchronization
+
+Supabase may store one small package-registry record keyed by package checksum,
+containing package/schema versions and the canonical metadata manifest used for
+validation. This is provenance, not a parallel response/event table.
+
+At sync, a LOCAL attempt must reference an identical registered package. If the
+package is absent, the trusted sync path may register it only after comparing it
+with current Supabase video metadata. Any ground-truth or pool mismatch is a
+conflict requiring operator review; it is never silently recomputed.
+
+## 11. LOCAL video streaming
+
+### 11.1 Path mapping
+
+Reuse `videos.file_path` as the relative local path:
+
+```text
+LOCAL_VIDEO_ROOT=/Users/.../colonoscopy-videos
+videos.file_path=video_001.mp4
+
+resolved file=/Users/.../colonoscopy-videos/video_001.mp4
+```
+
+Do not add `local_path`. Files remain outside the repository and outside
+Next.js `public/`.
+
+### 11.2 Controlled route
+
+Expose a LOCAL-only route such as:
+
+```text
+GET /api/local/attempts/{attempt_id}/videos/{video_order}
+HEAD /api/local/attempts/{attempt_id}/videos/{video_order}
+```
+
+For every request, including every Range request, the server:
+
+1. requires server mode `local`;
+2. loads the attempt from SQLite;
+3. verifies it is LOCAL and `in_progress`;
+4. calculates the first unanswered queue order from SQLite responses;
+5. requires the requested order to be that current order;
+6. reads only the canonical relative path from the attempt's immutable metadata
+   snapshot;
+7. resolves and validates the file under `LOCAL_VIDEO_ROOT`;
+8. streams the requested bytes.
+
+Knowing a video ID or filename is insufficient. The route never accepts a raw
+path and never asks Supabase during active LOCAL collection.
+
+### 11.3 Traversal and symlink protection
+
+Reject empty paths, absolute paths, NULs, `.`/`..` traversal, non-MP4 targets,
+directories, and symlinks whose real target leaves the root. Compare
+`path.relative(realRoot, realTarget)` after resolving both real paths; string
+prefix checks alone are insufficient.
+
+### 11.4 HTTP Range behavior
+
+- No `Range`: `200 OK` complete stream.
+- Valid single range: `206 Partial Content`.
+- Include `Accept-Ranges: bytes`, `Content-Type: video/mp4`, exact
+  `Content-Length`, and `Content-Range` for partial responses.
+- Support start-end, open-ended, and suffix ranges.
+- Reject malformed, multiple, unsatisfiable, or out-of-bounds ranges with
+  `416 Range Not Satisfiable` and `Content-Range: bytes */<size>`.
+- `HEAD` returns headers without a body.
+- Stream from disk instead of reading the complete MP4 into memory.
+
+A missing authorized file produces a clear LOCAL package/file error containing
+the video ID but not the absolute path. There is no Supabase Storage fallback.
+
+## 12. Complete LOCAL feature parity
+
+LOCAL is not a reduced backup screen. It uses the same SurveyJS validation,
+player state machine, marking behavior, final classification rules, and timing
+semantics as the approved study UI.
+
+The SQLite response transaction must reproduce current server derivation:
+
+- positive classification requires at least one remaining mark;
+- its response summary uses the first final-valid mark;
+- no classification uploads no marks;
+- no detection time is stored for a no response;
+- no-response latency is measured separately from the first real ended event;
+- detection latency is rounded from video time minus package
+  `lesion_onset_sec`, preserving negative values;
+- correctness is derived from the immutable package snapshot;
+- events and response commit atomically;
+- exact duplicate retry succeeds only when every stored field/event matches;
+- a differing retry is rejected;
+- completion depends on one response per queued order.
+
+The investigator must be able to take the prepared Mac to a doctor, create a
+new participant/session attempt, complete all videos, close and reopen the app,
+resume the same attempt, and export/sync later without Internet during
+collection.
+
+## 13. LOCAL to Supabase synchronization
+
+### 13.1 Explicit operator workflow
+
+First-version synchronization is an explicit command or protected operator
+action such as `Sync terminal local attempts`. It does not run invisibly in the
+background.
+
+Only `completed`, `abandoned`, or `invalid` LOCAL attempts may sync. An
+`in_progress` partial attempt must first be intentionally closed as abandoned or
+invalid so the payload becomes immutable.
+
+The local state machine is:
+
+```text
+never_synced -> syncing -> synced
+                        -> sync_failed
+                        -> conflict
+
+sync_failed  -> syncing
+conflict     -> operator resolution -> synced or remains conflict
+```
+
+`synced_at` is recorded only after an atomic Supabase import or explicit
+conflict resolution succeeds.
+
+### 13.2 Canonical payload
+
+Build one immutable payload containing:
+
+- attempt metadata;
+- exact queue rows ordered by video order;
+- exact responses ordered by video order;
+- exact events ordered by video order and click index;
+- the original locally generated attempt UUID;
+- original UTC timestamps;
+- package manifest/checksum and schema version.
+
+Serialize with a documented canonical JSON algorithm and calculate SHA-256.
+Store the digest locally before upload and in Supabase after acceptance. Numeric
+media/timing values are serialized without conversion through binary floating
+point formats that alter their recorded precision.
+
+### 13.3 Atomic sync boundary
+
+Use one service-role-only Supabase RPC, invoked only by the LOCAL server during
+an explicit operator action. The RPC:
+
+1. validates schema and package versions;
+2. verifies payload SHA-256;
+3. takes advisory locks for attempt ID and participant/session;
+4. validates attempt status and replacement relationship;
+5. validates exact pool, queue continuity, video metadata, correctness, timing,
+   and event semantics;
+6. applies conflict rules;
+7. inserts attempt, queue, responses, and events in one PostgreSQL transaction;
+8. returns a structured idempotent success or conflict result.
+
+Any insertion or validation failure rolls back every new row. No partially
+imported attempt is visible.
+
+### 13.4 Idempotency
+
+- Locally generated `attempt_id` remains unchanged.
+- Existing same attempt ID and identical digest/data returns the original
+  success or conflict result without new rows.
+- Existing same attempt ID with different digest or any differing row is a hard
+  conflict; no row is updated or overwritten.
+- Queue, response, and event uniqueness is attempt-scoped, so retry cannot
+  duplicate children.
+- Original queue order and timestamps are never regenerated.
+
+## 14. Synchronization conflict rules
+
+### Case A - no Supabase attempt for participant/session
+
+Import the attempt and all children atomically. Set `valid_for_analysis = false`
+by default. A completed attempt becomes valid only through the explicit operator
+decision function.
+
+### Case B - only incomplete ONLINE attempt exists
+
+Import the LOCAL attempt. Keep the ONLINE attempt. If declared,
+`replaces_attempt_id` links the LOCAL attempt to the ONLINE attempt. The operator
+may select that link during sync when the Mac did not know the ONLINE UUID
+offline, mark the old attempt abandoned, and explicitly designate the completed
+LOCAL attempt valid. No child rows move between attempts.
+
+### Case C - a completed valid attempt already exists
+
+Import the new raw LOCAL attempt only with `valid_for_analysis = false` and
+`sync_state = conflict`; do not clear the existing valid attempt. Preserve all
+new raw rows so they are auditable, but leave local `synced_at` unset until the
+operator resolves the conflict.
+
+Resolution choices are explicit and audited:
+
+- retain the existing valid attempt and mark the new attempt invalid; or
+- replace validity by clearing the old valid flag and selecting the new
+  completed attempt in one locked transaction.
+
+### Case D - same attempt ID and identical payload
+
+Return idempotent success. If the prior result was a validity conflict, return
+the same conflict until operator resolution.
+
+### Case E - same attempt ID but differing payload
+
+Return a hard conflict. Do not insert, update, delete, or merge anything.
+
+### No mixed-attempt analysis
+
+Formal analysis joins queue, responses, and events through one
+`assessment_attempts.attempt_id` where status is completed and
+`valid_for_analysis = true`. It never fills missing orders from another attempt.
+
+## 15. ONLINE participant authentication
+
+ONLINE removes Study access code from the participant UI. The form contains:
+
+- participant ID;
+- unique participant password;
+- Session 1, 2, or 3.
+
+One pre-provisioned Supabase Auth user maps to one participant ID and is reused
+across all three sessions. Participants do not self-register and do not see or
+type an email address.
+
+Use a non-exposed mapping table:
+
+```text
+private.assessment_participant_accounts
+  auth_user_id uuid primary key references auth.users(id) on delete restrict
+  participant_id text unique not null
+  internal_email text unique not null
+  active boolean not null default true
+  created_at timestamptz not null
+  updated_at timestamptz not null
+```
+
+Authorization derives participant ID from `auth.uid()` and this table. It never
+trusts browser participant ID or editable user metadata. No plaintext password,
+password hash, or access code is stored in public application tables.
+
+A trusted coordinator process provisions accounts with Supabase Auth Admin,
+pre-confirms the opaque internal email, and generates one random 8-12 character
+password, preferably 12 unambiguous characters. Provisioning is idempotent and
+compensates if Auth creation succeeds but mapping insertion fails.
+
+An ONLINE sign-in adapter accepts participant ID and password, resolves the
+private internal account in a tightly scoped login function, and calls normal
+Supabase `signInWithPassword`. It returns one generic invalid-credential error,
+never logs the password, and applies rate limiting. Password reset is
+coordinator-managed.
+
+## 16. ONLINE attempt and video authorization
+
+ONLINE start/resume creates or loads an ONLINE `assessment_attempts` row. A new
+attempt gets a new UUID and its own randomized queue. Resume requires explicit
+attempt identity when more than one attempt exists; the system may suggest the
+single in-progress attempt but cannot silently merge or replace attempts.
+
+Authenticated start and submit RPCs:
+
+- accept session and attempt/trial payload, not participant ID;
+- require `auth.uid()`;
+- map it to the active participant account;
+- verify attempt ownership, channel, session, status, and current order;
+- write only that attempt's rows.
+
+The private-video Edge Function:
+
+1. requires a valid Supabase user JWT;
+2. receives attempt ID and video order, not trusted participant ID or path;
+3. maps Auth UUID to participant;
+4. verifies the attempt is ONLINE, owned by that participant, in progress, and
+   targeting the first unanswered order;
+5. returns one `bucket` and `file_path` internally;
+6. creates one temporary private Storage signed URL;
+7. returns only signed URL, order, and expiry metadata.
+
+Private Storage remains private. ONLINE never falls back to local files.
+
+## 17. Study access code removal
+
+The final active UI/API contains no Study access code. Supabase Auth replaces it
+ONLINE; loopback-only LOCAL mode requires no credential.
+
+Removal is delayed and staged because the current release still uses the old
+contract:
+
+1. Attempt migration first preserves old access-code signatures through the
+   attempt-aware compatibility bridge.
+2. New LOCAL work uses SQLite and new attempt-aware interfaces.
+3. New ONLINE Auth functions and versioned Edge Functions are introduced under
+   new names.
+4. After the Auth release passes its rollback window, revoke old anonymous
+   access-code RPC execution and remove old functions/tables in a separately
+   approved cleanup migration.
+
+The uncommitted `supabase/remove_assessment_access_code.sql` is not the final
+migration. It combines destructive access-table cleanup with anonymous no-auth
+RPC grants and is superseded by this staged attempt/Auth design.
+
+## 18. Environment configuration
 
 ### LOCAL `.env.local`
 
 ```env
 ASSESSMENT_DEPLOYMENT_MODE=local
+LOCAL_DATABASE_PATH=/absolute/path/to/local-assessment.sqlite
+LOCAL_STUDY_PACKAGE_PATH=/absolute/path/to/study-package.json
+LOCAL_VIDEO_ROOT=/absolute/path/to/colonoscopy-videos
+
+# Optional during active offline collection; required only for explicit sync.
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-LOCAL_VIDEO_ROOT=/absolute/path/to/colonoscopy-videos
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY` is used only by server-side LOCAL routes and trusted
-upload tooling. It must never be imported into a Client Component, serialized,
-logged, or renamed to a `NEXT_PUBLIC_...` variable.
+Rules:
 
-The local Next.js server must bind to `127.0.0.1`, not a LAN interface. LOCAL
-mode intentionally has no participant authentication and is not approved for a
-publicly reachable server.
+- Deployment mode and all local paths are server-only.
+- LOCAL starts and completes attempts when every Supabase value is absent.
+- Missing sync credentials disable only sync, not collection.
+- The server binds to `127.0.0.1`.
+- Formal start requires successful package and filesystem validation.
 
 ### ONLINE `.env.production.local`
 
@@ -195,673 +905,252 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 ```
 
-ONLINE does not configure `LOCAL_VIDEO_ROOT` and does not require a Supabase
-service-role key inside the ECS Next.js process. Privileged Storage signing and
-account provisioning remain in trusted Supabase Edge Function or coordinator
-environments.
+ECS does not configure local database, package, or video paths. Edge Function
+secrets remain inside Supabase. A missing/invalid mode fails closed; mode is not
+inferred from hostname, port, branch, or a browser flag.
 
-### Supabase Edge Function secrets
+## 19. Error and offline handling
 
-Trusted Edge Functions use Supabase-managed server values:
+### LOCAL collection
 
-- `SUPABASE_URL`;
-- a publishable/anonymous project key for ordinary Auth sign-in calls where
-  required;
-- `SUPABASE_SERVICE_ROLE_KEY` for private account lookup and Storage signing.
-- `ONLINE_APP_ORIGIN` for an exact production CORS allowlist.
+- Missing/corrupt SQLite database: block collection and preserve files for
+  recovery; never create a new database over an existing unreadable file.
+- SQLite busy/disk-full/write failure: do not advance; keep the current trial
+  retryable and display an operator error.
+- Mac sleep/restart: reopen SQLite, run integrity/migration checks, and resume the
+  selected in-progress attempt.
+- Missing package or checksum mismatch: block formal start.
+- Missing MP4: identify video ID, not absolute path; no Storage fallback.
+- No network: collection remains fully functional; sync is unavailable.
+- Network loss during sync: PostgreSQL transaction rolls back or idempotent retry
+  detects the accepted payload.
 
-No Edge Function returns or logs a service-role key, plaintext password,
-internal email, or raw Storage path. Signed URLs are never logged; only the
-authenticated video function may return one to its authorized caller.
+### Attempt errors
 
-## 6. ONLINE Supabase Auth account mapping
+- Multiple in-progress attempts: require explicit operator/participant choice;
+  do not choose by timestamp silently.
+- Completed/abandoned/invalid attempt submission: reject.
+- Future/skipped/previous order: reject.
+- Replacement link across participant/session: reject.
+- Existing valid attempt: sync conflict, not overwrite.
 
-### 6.1 Account model
+### ONLINE
 
-Use Supabase Auth email-and-password accounts internally. Participants see only
-`participant_id` and `password`; they never see or type an email address.
+- Invalid participant/password/inactive mapping: one generic error.
+- Expired/revoked session: return to login.
+- Mismatched Auth user/attempt: generic authorization error.
+- Signed URL failure: remote video error; no LOCAL fallback.
 
-Create a non-exposed mapping table, for example:
+## 20. Security boundaries
 
-```text
-private.assessment_participant_accounts
-  auth_user_id uuid primary key references auth.users(id) on delete restrict
-  participant_id text unique not null
-  internal_email text unique not null
-  active boolean not null default true
-  created_at timestamptz not null default now()
-  updated_at timestamptz not null default now()
-```
+1. `ASSESSMENT_DEPLOYMENT_MODE` and filesystem/database paths are server-only.
+2. LOCAL is loopback-only and never approved for LAN/Internet exposure.
+3. The browser never receives SQLite access, local absolute paths, service-role
+   keys, internal emails, or ground-truth metadata.
+4. LOCAL video paths come only from the immutable package snapshot and current
+   SQLite queue authorization.
+5. ONLINE identity comes from Supabase Auth UUID mapping, not browser participant
+   ID or user metadata.
+6. ONLINE Storage remains private and current-order authorization is repeated at
+   the video boundary.
+7. LOCAL sync uses a service-role-only atomic RPC and explicit operator action.
+8. Attempt validity changes are explicit, locked, and audited.
+9. Raw attempts are never silently deleted or merged.
+10. Every `SECURITY DEFINER` function has a trusted owner, empty search path,
+    schema-qualified objects, explicit validation, and explicit grants.
+11. Passwords, JWTs, service keys, local paths, signed URLs, and clinical ground
+    truth are excluded from logs.
 
-Security rules:
+## 21. Migration safety and required preflight
 
-- The table is not in an exposed Data API schema.
-- Revoke access from `PUBLIC`, `anon`, and `authenticated`.
-- Only trusted provisioning code and narrowly scoped `SECURITY DEFINER`
-  functions may read it.
-- Authorization uses the table lookup from `auth.uid()` to `participant_id`.
-- `user_metadata` is never authoritative because users may edit it.
-- No password, password hash, access code, or reusable secret is stored in this
-  table.
-- Existing study tables retain text `participant_id`; no Auth UUID is added to
-  `responses`, `assessment_queue`, `lesion_detection_events`, or `videos`.
+Before any shared Supabase write:
 
-The `on delete restrict` relationship is intentional. Deactivating an account
-must not silently detach an Auth identity from preserved research data.
+1. Inspect live tables, columns, constraints, indexes, function signatures,
+   owners, grants, RLS, Storage policies, and deployed Edge Functions.
+2. Determine whether live state is access-code, no-access-code experimental, or
+   mixed. Repository files are not proof.
+3. Record counts and hashes for attempts-to-be-derived, queues, responses,
+   events, and videos.
+4. Audit duplicate orders, duplicate videos, orphan responses/events, queue gaps,
+   response completeness, and event linkage.
+5. Back up schema and data.
+6. Test the compatibility migration against a restored copy and the unchanged
+   `d4957ed` application.
+7. Obtain explicit approval for each stage that can affect the live release.
 
-### 6.2 Provisioning
+If the live state or a legacy mapping is ambiguous, stop with
+`BLOCKED_BY_ENVIRONMENT`. Never guess or delete research/test rows.
 
-A trusted coordinator script or administrative procedure performs provisioning;
-there is no participant signup flow.
+## 22. Development sequence
 
-For each participant:
+Do not implement multiple large phases simultaneously.
 
-1. Validate the exact canonical `participant_id`. Trim surrounding whitespace,
-   but do not silently change case or rewrite existing IDs.
-2. Generate an opaque internal email address that is not shown to the
-   participant.
-3. Generate one cryptographically random password, preferably 12 characters
-   from an unambiguous alphabet. Values from 8 to 12 random characters are
-   acceptable for this controlled study workflow.
-4. Call Supabase Auth Admin `createUser` from a trusted server context with the
-   email pre-confirmed.
-5. Insert the Auth UUID, exact participant ID, and internal email into the
-   private mapping table.
-6. Deliver the participant ID and password once through the study's controlled
-   channel.
+### Phase 1 - attempt model and compatibility proof
 
-Auth-user creation and mapping insertion cannot be one PostgreSQL transaction.
-Provisioning therefore must be idempotent and compensating: if mapping creation
-fails, disable or delete the newly created unused Auth account; if retrying,
-verify both sides before creating anything new.
+- Finalize attempt SQL and constraint transition.
+- Build migration tests against representative legacy states.
+- Prove the unchanged current release works through the compatibility bridge.
+- Do not execute the live migration without separate approval.
 
-One mapping row and one Auth user cover Sessions 1, 2, and 3. Password rotation
-changes the Supabase Auth password only and does not change participant IDs,
-queues, responses, or events. Password recovery is coordinator-managed because
-the internal email is not a participant communication address.
+### Phase 2 - LOCAL connected vertical slice with local video
 
-### 6.3 Login flow
+- Introduce attempt-aware interfaces on `main`.
+- Use dedicated test participant IDs.
+- Validate controlled local Range playback and full player semantics while
+  connected.
+- Treat this as a transitional slice, not the final LOCAL persistence model.
 
-The recommended login adapter is a small `participant-sign-in` Supabase Edge
-Function:
+### Phase 3 - SQLite offline LOCAL execution
 
-1. The ONLINE UI sends trimmed `participant_id` and password over HTTPS.
-2. The function validates input shape and applies rate limiting.
-3. A service client resolves the participant ID to the private internal email.
-4. A normal publishable-key Supabase client calls
-   `auth.signInWithPassword(internal_email, password)`.
-5. On success, the browser installs the returned Supabase Auth session and uses
-   its user JWT for subsequent RPC and Edge Function calls.
-6. On any lookup, inactive-account, or password failure, return the same generic
-   message: `Participant ID or password is invalid.`
+- Add package validation and SQLite schema.
+- Make SQLite authoritative for new LOCAL attempts.
+- Verify full 40-video formal completion and restart recovery with network
+  disabled.
 
-This function is unauthenticated only because it is the login boundary. Its
-`verify_jwt = false` setting is scoped to this function alone and does not grant
-study-data or video access. It must validate the project publishable-key request,
-apply abuse controls, never log the password, and never return the internal
-email.
+### Phase 4 - explicit LOCAL-to-Supabase sync
 
-The authenticated Supabase browser client enables normal session persistence
-and token refresh. Refreshing the assessment preserves login and then resumes
-from the database. Expired or revoked sessions return to the login screen. An
-explicit sign-out control clears the Supabase session, but completing one
-session does not force sign-out because the same account may continue to the
-next study session.
+- Add canonical payload, digest, atomic sync RPC, retries, and conflict handling.
+- Verify Cases A-E and validity decision audit.
 
-## 7. LOCAL no-auth boundary
+### Phase 5 - ONLINE account pool and Supabase Auth
 
-LOCAL participants enter only:
+- Provision participant accounts.
+- Add authenticated attempt-aware RPC and signed-video paths.
+- Remove Study access code from the new ONLINE UI while retaining rollback
+  compatibility.
 
-- `participant_id`;
-- `session_number` in 1, 2, or 3.
+### Phase 6 - manual approved release
 
-There is no password field, Study access code field, browser-generated access
-token, or Supabase Auth requirement.
+- Promote only selected approved commits from `main` to `release`.
+- Deploy ECS manually.
+- Run HTTP, Auth, attempt, queue, signed-video, response, resume, completion, and
+  analysis smoke tests.
+- Perform old access-code cleanup only after separate approval and rollback
+  window completion.
 
-The trust boundary is the loopback-only Next.js server:
+## 23. Testing and verification
 
-- Client Components never receive the service-role key.
-- LOCAL start/resume and submission go through Next.js Route Handlers or Server
-  Actions.
-- Every LOCAL handler first checks server-only
-  `ASSESSMENT_DEPLOYMENT_MODE=local`.
-- In ONLINE mode, LOCAL handlers return `404` or a generic mode-disabled error
-  before parsing study inputs, calling Supabase, or touching the filesystem.
-- The LOCAL server calls service-role-only LOCAL RPC wrappers. Anonymous
-  browsers receive no direct execution grant on those functions.
-- Participant ID and session are trusted only because the process is local and
-  loopback-bound. This mode is not suitable for LAN or Internet exposure.
+### Attempt and migration tests
 
-No client-side boolean, query parameter, cookie, build branch, or failed Auth
-request can activate LOCAL mode.
+- UUIDv5 legacy backfill is stable and idempotent.
+- Every old child row receives exactly one correct attempt ID.
+- Old API signatures and return shapes remain unchanged during bridge stage.
+- Unchanged `d4957ed` can start, resume, authorize video, submit, and complete.
+- Old unique constraints are removed only after bridge verification.
+- New uniqueness permits separate attempts but rejects duplicates within one
+  attempt.
+- Composite foreign keys reject participant/session/video mismatches.
+- At most one completed attempt is valid per participant/session.
+- Existing IDs, timestamps, answers, timing, and event fields are unchanged.
 
-## 8. Study mode and session binding
+### SQLite and offline tests
 
-LOCAL and ONLINE share one Supabase project, so one global study-mode row cannot
-safely represent both environments. Add an environment-scoped configuration
-table without changing the old table during transition:
+- Brand-new participant and formal session start with all network disabled.
+- Exactly 40 correct pool videos are randomized and persisted.
+- Browser, Next.js, and Mac restart resume the same attempt/order.
+- WAL recovery, busy database, disk-full, and failed transaction do not advance.
+- Response and events commit atomically.
+- Duplicate and differing retries match Supabase semantics.
+- Package checksum, pool overlap, missing metadata, missing file, and file hash
+  failures block formal start.
 
-```text
-private.assessment_runtime_channels
-  runtime_channel text primary key check in ('local', 'online')
-  study_mode text not null check in ('dev', 'formal')
-  updated_at timestamptz not null default now()
-```
+### Local video tests
 
-Seed both channels from the current authoritative mode, then allow the study
-operator to change LOCAL independently. The participant UI never writes this
-table.
+- Full stream returns 200.
+- Start-end, open-ended, and suffix ranges return exact 206 bytes.
+- Invalid/multiple ranges return 416.
+- Seeking restrictions before first end and free replay afterward work in a real
+  HTML5 player.
+- Traversal, encoded traversal, NUL, absolute path, directory, and escaping
+  symlink are denied.
+- Future/completed order is denied.
+- Supabase and Storage are never called during active LOCAL playback.
 
-Add a credential-free session binding table:
+### Synchronization tests
 
-```text
-private.assessment_session_context
-  participant_id text not null
-  session_number integer not null check between 1 and 3
-  runtime_channel text not null check in ('legacy', 'local', 'online')
-  study_mode text not null check in ('dev', 'formal')
-  created_at timestamptz not null default now()
-  primary key (participant_id, session_number)
-```
+- Cases A-E return deterministic outcomes.
+- Same digest retry creates no rows.
+- Different payload for one attempt ID changes no rows.
+- A failed child insert rolls back attempt and all children.
+- Original queue order, UUIDs, timestamps, marks, and timing remain exact.
+- Existing valid attempt is never silently cleared.
+- Explicit resolution records an audit decision.
+- Formal analysis never combines attempts.
 
-On first start, the appropriate wrapper binds the participant/session to its
-hard-coded channel and the channel's database-configured study mode. Every
-resume, response, and video authorization requires the same binding. A
-participant/session created in LOCAL cannot later be opened in ONLINE, or vice
-versa. This prevents shared-database test activity from silently merging with a
-public study session while preserving the analysis key of participant ID plus
-session number.
+### ONLINE tests
 
-`legacy` exists only for migration of queues whose origin was not previously
-recorded. A legacy session may be claimed once, atomically, by LOCAL or by the
-correct authenticated ONLINE account, only when its recorded study mode matches
-the selected channel. New sessions never use `legacy`.
+- Participant ID/password login uses one Auth user across Sessions 1-3.
+- Editing participant ID cannot impersonate another account.
+- Attempt ownership and current order are enforced by RPC and video function.
+- Private Storage direct anonymous access fails.
+- ONLINE never reads LOCAL files or SQLite.
 
-## 9. Database and RPC design
+### Standard gates
 
-### 9.1 Shared private business functions
-
-Move queue, response, event, and current-order rules behind private functions
-that receive an already resolved participant ID. These functions retain the
-existing advisory locks, exact eligible-pool checks, randomization, queue
-validation, first-unanswered-order checks, atomic event/response insertion,
-derived correctness/timing fields, and idempotent retry comparison.
-
-The private functions are not exposed through the Data API and grant no execute
-privilege to `PUBLIC`, `anon`, or `authenticated`.
-
-### 9.2 LOCAL wrappers
-
-Create separately named LOCAL entry points, for example:
+Each implementation phase runs its focused tests plus:
 
 ```text
-start_or_resume_assessment_local(participant_id, session_number)
-submit_video_response_local(participant_id, session_number, ...payload)
-authorize_current_assessment_video_local(participant_id, session_number, video_order)
+npm run typecheck
+npm test
+npm run build
 ```
 
-All are executable only by `service_role`. They hard-code the `local` channel,
-resolve its database study mode, enforce the session context, and then call the
-shared private business functions. The LOCAL video authorization result includes
-only the canonical current `video_id` and relative `file_path` required by the
-server route; it never accepts or returns an absolute local path.
-
-### 9.3 ONLINE wrappers
-
-Create separately named ONLINE entry points:
-
-```text
-start_or_resume_assessment_online(session_number)
-submit_video_response_online(session_number, ...payload)
-authorize_current_assessment_video_online(auth_user_id, session_number, video_order)
-```
-
-The start and response wrappers are executable only by `authenticated`. They do
-not accept `participant_id`. Each call requires a non-null `auth.uid()`, looks
-up one active mapping row, obtains the canonical participant ID, hard-codes the
-`online` channel, validates session context, and invokes the private function.
-
-The video authorization wrapper is executable only by `service_role` because it
-returns `bucket` and `file_path`. The authenticated video Edge Function first
-validates the user JWT, obtains the Auth UUID, and then supplies that verified
-UUID. The function repeats account mapping, session-context, first-unanswered
-order, and queue membership checks before returning one Storage object.
-
-Authenticated role membership alone is never sufficient authorization. Every
-ONLINE function must bind `auth.uid()` or the Edge-verified Auth UUID to the
-private participant mapping.
-
-### 9.4 Result payloads
-
-ONLINE browser payloads omit `participant_id`; PostgreSQL derives it from the
-Auth mapping. LOCAL browser payloads include participant ID only to the local
-Next.js server, which invokes the LOCAL service wrapper.
-
-Both paths insert the same final records into:
-
-- `assessment_queue`;
-- `responses`;
-- `lesion_detection_events`.
-
-No result-table columns are duplicated or renamed. `responses.id` and
-`created_at` remain database-generated. Positive summaries still use the first
-valid lesion click; negative summaries keep lesion detection time null. Deleted
-unsubmitted marks are not uploaded.
-
-## 10. LOCAL video streaming
-
-### 10.1 Path mapping
-
-Reuse `videos.file_path` exactly as a relative local path:
-
-```text
-LOCAL_VIDEO_ROOT=/Users/.../colonoscopy-videos
-videos.file_path=video_001.mp4
-
-resolved file=/Users/.../colonoscopy-videos/video_001.mp4
-```
-
-Do not add `local_path`. `videos.bucket` remains relevant to ONLINE Storage and
-is ignored by LOCAL playback after authorization.
-
-### 10.2 Controlled route
-
-Expose a LOCAL-only route such as:
-
-```text
-GET /api/local/video/current?participant_id=...&session_number=...&video_order=...
-HEAD /api/local/video/current?participant_id=...&session_number=...&video_order=...
-```
-
-For every request, including every Range request, the route:
-
-1. Requires server mode `local`.
-2. Validates participant ID, session number, and positive video order.
-3. Calls `authorize_current_assessment_video_local` through the server-only
-   service client.
-4. Uses only the returned canonical `file_path`; a browser-supplied `video_id`
-   or path is never used for filesystem access.
-5. Resolves the path under `LOCAL_VIDEO_ROOT` and verifies containment.
-6. Verifies that the resolved target is a regular MP4 file.
-7. Streams the requested bytes.
-
-Knowing a video ID, guessing a filename, or requesting a future video order is
-insufficient. The database must confirm that the order is the first unanswered
-queue item for that participant/session.
-
-### 10.3 Traversal and symlink protection
-
-Reject:
-
-- empty paths;
-- absolute paths;
-- NUL bytes;
-- `.` or `..` traversal segments;
-- non-MP4 targets;
-- directories;
-- symlinks whose real target leaves the configured root.
-
-Resolve the real root and real target, then verify `path.relative(realRoot,
-realTarget)` is neither absolute nor prefixed by `..`. Do not rely on string
-prefix comparison alone.
-
-### 10.4 HTTP Range behavior
-
-The route supports HTML5 seeking and replay:
-
-- No `Range` header: return `200 OK` with the complete stream.
-- Valid single byte range: return `206 Partial Content`.
-- Include `Accept-Ranges: bytes`, `Content-Type: video/mp4`, accurate
-  `Content-Length`, and `Content-Range` for partial responses.
-- Support open-ended and suffix byte ranges.
-- Reject malformed, multiple, unsatisfiable, or out-of-bounds ranges with
-  `416 Range Not Satisfiable` and `Content-Range: bytes */<size>`.
-- `HEAD` returns the same applicable headers without a body.
-- Stream from disk; do not read the entire MP4 into memory.
-
-If the authorized file is missing, return a clear LOCAL configuration error
-that identifies the authorized `video_id` for the operator but does not expose
-the absolute root or resolved filesystem path to the browser. Never request a
-Supabase Storage URL as fallback.
-
-## 11. ONLINE private video delivery
-
-Keep private Supabase Storage and signed URLs. Introduce a versioned
-authenticated Edge Function during migration, for example
-`issue-assessment-video-url-v2`, so the currently deployed access-code function
-remains available for rollback.
-
-The v2 flow is:
-
-1. Browser invokes the function with its Supabase user JWT and project
-   publishable key.
-2. Edge gateway JWT verification remains enabled for this function.
-3. The handler validates the current user and accepts only `session_number` and
-   `video_order`; it does not trust a browser participant ID.
-4. The handler calls the service-only ONLINE video authorization RPC with the
-   verified Auth UUID.
-5. PostgreSQL maps the Auth UUID to the canonical participant, verifies channel,
-   session, queue, and first-unanswered order, and returns one `bucket` and
-   `file_path` to the Edge Function only.
-6. The service client creates the temporary private Storage signed URL.
-7. The browser receives only the signed URL, order, and expiry metadata.
-
-The Storage bucket remains private. The function does not list objects, return
-raw Storage paths, accept arbitrary video IDs, or fall back to LOCAL files.
-
-## 12. Removal of Study access code
-
-The active final UI contains:
-
-- LOCAL: participant ID and session number;
-- ONLINE: participant ID, password, and session number.
-
-It contains no Study access code field, default code, code validation, code ref,
-RPC parameter, Edge Function parameter, documentation instruction, or test
-fixture.
-
-The final active database API contains no access-code argument or digest check.
-Supabase Auth replaces participant authentication ONLINE; loopback server mode
-replaces it LOCAL.
-
-Do not immediately drop the old functions or access tables. They remain only as
-a temporary rollback boundary and receive no new design features. After the new
-ONLINE release and rollback window succeed, a dedicated cleanup migration:
-
-1. revokes anonymous execution of the old access-code RPC signatures;
-2. removes the old access-code Edge Function after its rollback window;
-3. archives or exports the old access mapping counts for deployment records;
-4. drops `assessment_session_access` and `assessment_enrollments` only after
-   confirming the new Auth mapping and session context cover every active
-   ONLINE participant/session;
-5. removes obsolete access-code code, tests, and documentation.
-
-The uncommitted `remove_assessment_access_code.sql` is superseded because it
-combines destructive cleanup with anonymous no-auth grants.
-
-## 13. Migration strategy
-
-### Phase A: live-schema and data preflight
-
-Before any Supabase write:
-
-1. Inspect the live function signatures, owners, grants, RLS state, Storage
-   policies, and Edge Function configuration.
-2. Determine whether the live database is the access-code schema, the
-   no-access-code experiment, or a mixed state. Repository files are not proof
-   of live state.
-3. Record row counts and distinct participant/session counts for `videos`,
-   `assessment_queue`, `responses`, and `lesion_detection_events`.
-4. Record duplicate checks, orphan checks, queue-order continuity, response
-   uniqueness, and event-to-response linkage.
-5. Export a rollback-safe schema snapshot and backup before migration.
-
-If live state cannot be identified unambiguously, stop with
-`BLOCKED_BY_ENVIRONMENT`; do not substitute guessed SQL.
-
-### Phase B: additive database migration
-
-Without changing or dropping current production objects:
-
-1. Create the private participant account mapping table.
-2. Create environment-scoped runtime configuration.
-3. Create session context.
-4. Create private shared business functions.
-5. Create new LOCAL and ONLINE wrapper functions with new names.
-6. Apply explicit `REVOKE` and least-privilege `GRANT` statements.
-7. Seed channel modes from the existing authoritative mode.
-8. Populate legacy session context without changing queue or result rows.
-
-The new wrappers must also handle sessions created by the still-running old
-release after this additive migration. If a queue has a valid historical access
-binding but no new context row, the first new-wrapper request materializes a
-`legacy` context inside the same advisory-locked transaction before applying the
-normal one-time claim rules. This prevents a queue created during the migration
-window from becoming orphaned.
-
-For existing queues, derive study mode first from the historical session access
-or enrollment record. If those records do not exist, compare the exact queued
-video set against eligible DEV and FORMAL pools. Infer only when exactly one
-mode is a complete match. Mark the channel `legacy`; never guess LOCAL versus
-ONLINE from participant naming, timestamps, or directory order. Report and
-manually resolve ambiguous sessions before cutover.
-
-### Phase C: LOCAL implementation on `main`
-
-Implement LOCAL UI, server routes, LOCAL RPC adapter, and Range streaming on
-`main`. Use only the additive new database objects. Do not deploy a modified
-existing ONLINE Edge Function, do not alter `release`, and do not change the
-running ECS process.
-
-Because the database is shared, LOCAL test participant IDs must not reuse
-active ONLINE participant/session keys. The session-context constraint provides
-the final enforcement.
-
-### Phase D: ONLINE Auth preparation
-
-1. Provision Supabase Auth accounts and private mappings.
-2. Deploy the new participant sign-in function.
-3. Deploy the new versioned authenticated video function.
-4. Test ONLINE Auth and authorization without modifying the old production
-   function names.
-5. Verify one password resumes all three sessions for the mapped participant,
-   while another participant cannot access them.
-
-### Phase E: manual release and cutover
-
-After LOCAL and ONLINE tests pass and the user explicitly approves release:
-
-1. Promote only approved commits from `main` to `release` using the documented
-   manual workflow.
-2. Record the current ECS commit.
-3. Deploy `origin/release` manually.
-4. Run HTTP, Auth, queue, signed-video, response, resume, and completion smoke
-   tests.
-5. Keep old database functions, old Edge Function, and access tables intact for
-   rollback.
-
-If rollback is needed, restore the previous ECS commit and old Edge Function;
-the additive database objects do not prevent the old access-code application
-from running.
-
-### Phase F: delayed cleanup
-
-Only after an explicit second approval and a completed rollback window:
-
-1. Re-run preservation counts and integrity checks.
-2. Revoke and remove old access-code entry points.
-3. Remove obsolete access tables after recording their migration audit.
-4. Keep all videos, queues, responses, events, IDs, timestamps, and unique
-   constraints unchanged.
-5. Verify export/analysis queries against the preserved tables.
-
-No phase uses `DELETE`, `TRUNCATE`, or table recreation on the four protected
-research tables.
-
-## 14. Error handling
-
-### Configuration
-
-- Missing/invalid deployment mode: application configuration error; no mode
-  selected.
-- LOCAL missing root or service key: LOCAL configuration error; no ONLINE
-  fallback.
-- ONLINE missing Supabase public configuration: ONLINE configuration error; no
-  LOCAL fallback.
-- Missing channel study configuration: assessment not started.
-
-### Authentication and authorization
-
-- Invalid participant ID, password, inactive mapping, or missing mapping: one
-  generic login error.
-- Expired/revoked ONLINE session: clear local Auth state and return to login.
-- Authenticated user attempts another participant: generic authorization error;
-  do not reveal whether the target exists.
-- Cross-channel session or wrong study mode: reject without creating or
-  reshuffling a queue.
-- Future, previous, skipped, or completed video order: generic video access
-  denied.
-
-### Video
-
-- LOCAL missing file: clear LOCAL missing/configuration message; no absolute
-  path and no Storage fallback.
-- LOCAL unsafe path: generic access denied and server-side security log without
-  participant password or secret.
-- Invalid Range: `416` with standards-compliant size header.
-- ONLINE signing failure: remote video preparation error; no local fallback.
-
-### Submission
-
-- A failed Supabase commit does not count as completed and leaves the response
-  retryable.
-- Exact retries remain idempotent; differing duplicate payloads remain rejected.
-- The client advances only after the database confirms success.
-
-## 15. Security boundaries
-
-1. `ASSESSMENT_DEPLOYMENT_MODE` and `LOCAL_VIDEO_ROOT` are server-only.
-2. ECS does not contain local paths or a LOCAL server service-role secret.
-3. The browser never receives the service-role key.
-4. LOCAL service-role usage is confined to loopback-only Next.js server code.
-5. ONLINE authorization is based on Auth UUID mapping, never browser
-   participant ID or editable user metadata.
-6. ONLINE start and submit RPCs derive participant ID inside PostgreSQL.
-7. Video authorization repeats current-order checks independently of the UI.
-8. `bucket` and `file_path` remain hidden from ONLINE browsers.
-9. LOCAL filesystem resolution uses a database-authorized path and realpath
-   containment.
-10. Private functions and mapping tables are not directly executable/readable
-    by `anon` or `authenticated`.
-11. Every `SECURITY DEFINER` function has a trusted owner, empty search path,
-    schema-qualified objects, explicit input validation, explicit grants, and
-    tests for unauthorized callers.
-12. Credentials, JWTs, passwords, service keys, raw local paths, and signed URLs
-    are excluded from application logs.
-13. CORS is restricted to the configured ONLINE origin for authenticated Edge
-    Functions; wildcard CORS is not retained for the final public path.
-
-## 16. Testing and verification
-
-### Static and unit tests
-
-- Runtime mode parser accepts only `local` or `online` and fails closed.
-- Client mode display cannot authorize a server route.
-- LOCAL and ONLINE adapters satisfy the same assessment contracts.
-- Existing timing, mark deletion, yes/no exclusivity, response snapshot, and
-  completion tests remain unchanged.
-- Entire project contains no active Study access code UI or payload after final
-  cutover.
-
-### SQL and migration tests
-
-- New tables and functions are additive during transition.
-- `anon` cannot execute LOCAL, ONLINE, private, response, or video authorization
-  functions.
-- `authenticated` can execute only ONLINE start and submit wrappers.
-- ONLINE wrappers reject null or mismatched `auth.uid()` mappings.
-- LOCAL and video authorization wrappers are service-role-only.
-- Session context prevents cross-channel and cross-mode reuse.
-- Existing queue order, response IDs, event IDs, timestamps, and row counts are
-  unchanged by migration.
-- Existing unique constraints and exact retry behavior still hold.
-- Formal sessions still require exactly 40 eligible videos from their own pool.
-
-### Auth integration tests
-
-- Coordinator creates an account without exposing the service key.
-- UI logs in with participant ID and password, not email.
-- Wrong ID and wrong password produce indistinguishable errors.
-- One Auth account starts/resumes Sessions 1, 2, and 3 independently.
-- Editing participant ID after login cannot change the database participant.
-- A second Auth account cannot read, resume, submit, or authorize the first
-  participant's session.
-- Deactivated accounts are denied.
-
-### LOCAL video tests
-
-- Complete response returns `200` and correct headers.
-- Valid start-end, open-ended, and suffix ranges return `206` and exact bytes.
-- Invalid or multiple ranges return `416`.
-- Seeking and replay work in a real HTML5 video element.
-- Missing file returns the LOCAL-specific error.
-- Absolute paths, `..`, encoded traversal, NULs, directories, and escaping
-  symlinks are rejected.
-- Future video order and completed video order are denied.
-- Supabase Storage is never called in LOCAL mode, including failure paths.
-
-### ONLINE video tests
-
-- Missing or invalid JWT is rejected before signing.
-- Auth identity is mapped to the correct participant.
-- Current order receives one private signed URL.
-- Future, skipped, previous, and completed orders are rejected.
-- LOCAL filesystem APIs and paths are never called in ONLINE mode.
-- Storage remains private and direct anonymous reads fail.
-
-### End-to-end verification
-
-For both LOCAL and ONLINE, verify:
-
-1. first start creates one persisted randomized queue;
-2. refresh resumes the first unanswered video;
-3. Sessions 1, 2, and 3 stay isolated;
-4. a response and lesion events commit atomically;
-5. duplicate protection and exact retry work;
-6. completion is dynamic from queue length;
-7. DEV and FORMAL pool rules remain correct;
-8. resulting Supabase rows remain directly exportable for analysis.
-
-Run `npm run typecheck`, `npm test`, and `npm run build` before any manual
-promotion. Database migrations additionally require live-schema preflight,
-transactional verification, post-migration counts, privilege inspection, and
-real browser smoke tests.
-
-## 17. Branch and release safety
-
-- `main` remains the active local development branch.
-- LOCAL implementation commits go only to `main` until explicitly approved.
-- `release` remains at its known-good public commit during LOCAL work.
-- Shared Supabase changes made before release are additive and use new names, so
-  the running access-code release remains functional.
-- Existing Edge Function names used by ECS are not overwritten during LOCAL or
-  pre-release ONLINE testing.
-- Promotion is manual fast-forward or selective cherry-pick according to
-  `docs/environment-and-release-workflow.md`.
-- ECS fetches and deploys only `origin/release`.
-- No CI/CD, webhook, scheduled deployment, branch synchronization, or automatic
-  database migration is added.
-- The single ECS directory remains
+Live migration requires preflight, restored-copy rehearsal, post-migration
+counts/constraints/grants, unchanged-release browser verification, and explicit
+human approval.
+
+## 24. Branch and release safety
+
+- `main` remains active development and LOCAL/new-architecture work.
+- `release` remains manually approved public ECS code only.
+- This design revision changes only documentation on `main`.
+- No implementation commit is promoted automatically.
+- No GitHub Actions deployment, webhook, CI/CD deployment, scheduled sync, or
+  automatic `main -> release` operation is added.
+- ECS continues to fetch and deploy only `origin/release`.
+- Shared Supabase migrations that can affect the current release are not
+  executed until backward compatibility is reviewed and separately approved.
+- LOCAL development uses dedicated participant IDs and does not reuse active
+  ONLINE participant/session records before attempt-aware migration approval.
+- The current ECS directory remains
   `/var/www/deskilling/colonoscopy-assessment-platform`.
 
-## 18. Acceptance criteria
+## 25. Acceptance criteria
 
-The architecture is complete only when all of the following are true:
+The revised architecture is complete only when:
 
-1. LOCAL accepts participant ID and session only, streams authorized local MP4s
-   with Range support, and stores all results in Supabase.
-2. ONLINE accepts participant ID and one participant password, uses Supabase
-   Auth, and never trusts browser participant identity.
-3. LOCAL and ONLINE cannot fall back to each other.
-4. DEV/FORMAL, queue, resume, response, timing, event, and completion behavior
-   remain unchanged.
-5. Existing research/test rows are preserved exactly.
-6. The old Study access code is absent from the final active UI and API, but its
-   rollback path is retained until separately approved cleanup.
-7. `release` and the public ECS deployment change only after explicit manual
-   promotion and deployment approval.
+1. A disconnected Mac can start a brand-new formal participant/session and
+   complete all 40 videos.
+2. The same LOCAL attempt recovers after browser, process, and Mac restart.
+3. LOCAL playback never requires Supabase Storage or live video metadata.
+4. LOCAL includes the complete experimental feature set, not a reduced UI.
+5. Terminal LOCAL attempts synchronize into canonical Supabase attempt, queue,
+   response, and event rows.
+6. Sync is atomic, idempotent, preserves original data, and never silently
+   overwrites conflicts.
+7. An abandoned ONLINE attempt and replacement LOCAL attempt remain separate and
+   auditable.
+8. No partial attempt is combined with another attempt for analysis.
+9. Exactly one completed attempt may be explicitly designated valid per
+   participant/session unless the investigator explicitly changes the decision.
+10. ONLINE uses pre-provisioned participant-specific Supabase Auth passwords.
+11. LOCAL requires no password or access code.
+12. Existing queues, responses, events, videos, IDs, timestamps, and constraints
+    are preserved through the staged migration.
+13. The unchanged current ECS release remains functional through the approved
+    compatibility stages.
+14. `release` and the running ECS remain unchanged until explicit manual
+    approval.
 
-## 19. Supabase references verified for this design
+## 26. Supabase references retained for this design
 
 - Password sign-in:
   <https://supabase.com/docs/guides/auth/passwords>
 - Server-only Auth account provisioning:
   <https://supabase.com/docs/reference/javascript/auth-admin-createuser>
-- Auth-user data mapping and primary-key references:
+- Auth-user data mapping:
   <https://supabase.com/docs/guides/auth/managing-user-data>
-- Edge Function authorization headers and JWT verification:
+- Edge Function authorization and JWT verification:
   <https://supabase.com/docs/guides/functions/auth-headers>
-- Auth context inside Edge Functions:
-  <https://supabase.com/docs/guides/functions/auth>
 - Supabase password storage:
   <https://supabase.com/docs/guides/auth/password-security>
