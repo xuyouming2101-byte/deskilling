@@ -242,7 +242,9 @@ the queue itself.
 
 ## Production deployment
 
-For the Ubuntu 22.04 Alibaba Cloud ECS deployment using PM2 and Nginx, see
-[`docs/alibaba-ecs-deployment.md`](docs/alibaba-ecs-deployment.md). This
-deployment keeps the existing Supabase database, RPC, Edge Function, and private
-Storage architecture unchanged.
+Local development uses `main` with `.env.local`; ECS production uses only the
+manually promoted `release` branch with `.env.production.local`. See
+[`docs/environment-and-release-workflow.md`](docs/environment-and-release-workflow.md)
+for promotion rules and
+[`docs/alibaba-ecs-deployment.md`](docs/alibaba-ecs-deployment.md) for ECS update
+and rollback commands. There is no automatic deployment.
