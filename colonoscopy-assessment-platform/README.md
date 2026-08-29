@@ -2,13 +2,13 @@
 
 Target assessment loop:
 
-1. Collect `participant_id`, `session_number` (`1`, `2`, or `3`), and the coordinator-issued access code.
-2. Call `start_or_resume_assessment(participant_id, session_number, access_code)`. PostgreSQL validates the active enrollment and authoritative mode, then owns pool selection, randomization, queue persistence, and resume order.
+1. Collect `participant_id` and `session_number` (`1`, `2`, or `3`).
+2. Call `start_or_resume_assessment(participant_id, session_number)`. PostgreSQL reads the authoritative mode, then owns pool selection, randomization, queue persistence, and resume order.
 3. Ask a trusted Edge Function for the current video's URL. It calls the service-role-only `authorize_current_assessment_video` RPC and signs only the first unanswered private Storage object.
-4. Show `Video X / queue length` and play the current video with task-specific, seek-free controls.
+4. Show `Video X / queue length` and play the current video with task-specific controls. During the first pass, forward seeking is limited to naturally watched content; after the first real `ended` event, replay and free seeking are available.
 5. After playback starts, let the participant use `Lesion detected` repeatedly; each click separately records millisecond-precision media time and playback-start elapsed time.
-6. After the actual HTML5 `ended` event, finalize exactly one response: `Next video` submits `yes` when at least one click exists, while `No lesion detected` submits `no` and overrides any prior clicks.
-7. Submit the final classification and raw click audit atomically through the access-code-bound `submit_video_response` RPC, then advance only after a successful response.
+6. After the actual HTML5 `ended` event, finalize exactly one response: `Next video` submits `yes` when at least one click exists, while `No lesion detected` submits `no` and discards any unsubmitted marks after confirmation.
+7. Submit the final classification and raw click audit atomically through the `submit_video_response` RPC, then advance only after a successful response.
 8. Show a completion page after every queued video has a saved response.
 
 Survey Creator and admin drag-and-drop editing are not included.
@@ -24,15 +24,16 @@ this MVP only validates the technical multi-session workflow.
    npm install
    ```
 
-2. For a fresh project, run `supabase/schema.sql` in the Supabase SQL editor.
-   For an existing project that already has the previous hardening migrations,
-   apply `supabase/assessment_enrollment_hardening.sql` instead.
+2. For a fresh project, run `supabase/schema.sql` in the Supabase SQL editor,
+   followed by `supabase/remove_assessment_access_code.sql`. For an existing
+   project with the previous hardening migrations, apply only
+   `supabase/remove_assessment_access_code.sql`.
 
 3. Deploy `supabase/functions/issue-assessment-video-url`. Its checked-in
    `supabase/config.toml` sets `verify_jwt = false` because the browser uses a
-   publishable key rather than a user JWT. The function performs its own
-   authorization with the coordinator-issued access code and the
-   service-role-only current-video RPC. Keep the platform-provided
+   publishable key rather than a user JWT. The function uses the
+   service-role-only current-video RPC to authorize only the first unanswered
+   queue item. Keep the platform-provided
    `SUPABASE_SERVICE_ROLE_KEY` inside the Edge Function runtime only.
 
 4. Copy `.env.example` to `.env.local` and fill in:
@@ -47,49 +48,7 @@ this MVP only validates the technical multi-session workflow.
    `SUPABASE_SERVICE_ROLE_KEY` to browser code; it is reserved for trusted
    upload tooling and the current-video Edge Function.
 
-5. Provision one enrollment per participant and session. Use a unique,
-   high-entropy access code of at least 20 characters and give the plaintext
-   code to the participant through the study's controlled channel. PostgreSQL
-   stores only its SHA-256 digest:
-
-   ```sql
-   begin;
-
-   delete from public.assessment_session_access
-   where participant_id = 'P001'
-     and session_number = 1;
-
-   insert into public.assessment_enrollments (
-     participant_id,
-     session_number,
-     access_code_digest,
-     study_mode,
-     active
-   )
-   values (
-     'P001',
-     1,
-     extensions.digest('replace-with-a-unique-high-entropy-code', 'sha256'),
-     'dev',
-     true
-   )
-   on conflict (participant_id, session_number) do update
-   set
-     access_code_digest = excluded.access_code_digest,
-     study_mode = excluded.study_mode,
-     active = excluded.active,
-     updated_at = now();
-
-   commit;
-   ```
-
-   Deleting the old access binding is deliberate when provisioning or rotating
-   a code; it does not delete the persisted queue or responses. A legacy queue
-   without an active enrollment cannot resume. Once provisioned, it is reused
-   only if its videos and contiguous order exactly match the eligible pool for
-   the enrollment/runtime mode.
-
-6. Confirm the private Supabase Storage objects exist and the `videos` table contains the eligible assessment videos:
+5. Confirm the private Supabase Storage objects exist and the `videos` table contains the eligible assessment videos:
 
    ```text
    video_id: stable unique ID, for example video_001
@@ -131,22 +90,22 @@ this MVP only validates the technical multi-session workflow.
    npm run upload:video -- "/absolute/path/to/video-under-50mb.mp4" "video_001" "video_001.mp4"
    ```
 
-7. Start the app:
+6. Start the app:
 
    ```bash
    npm run dev
    ```
 
-The enrollment migration, Edge Function, and frontend access-code integration
-must be released together. The migration removes anonymous Storage access and
-stops returning `bucket` or `file_path` from the browser queue RPC; the Edge
-Function is the only runtime path that can authorize and sign the current video.
+The access-code removal migration, Edge Function, and frontend change must be
+released together. The browser queue RPC still does not return `bucket` or
+`file_path`; the Edge Function remains the only runtime path that can authorize
+and sign the current video.
 
 ## Atomic response and click audit data
 
 PostgreSQL generates all `id` and `created_at` values. The browser never sends
 them. A completed video is submitted through
-`public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb, text)`.
+`public.submit_video_response(text, integer, text, integer, boolean, bigint, bigint, boolean, jsonb)`.
 The `SECURITY DEFINER` RPC is owned by the trusted migration role, has an empty
 search path, and validates the matching `assessment_queue` row, completion
 state, timing values, and contiguous click indexes. It inserts raw events before
@@ -169,32 +128,23 @@ playback-start elapsed time, a snapshot of `lesion_onset_sec`, signed
 `detection_latency_ms`, and finalization flags. Negative detection latency is
 preserved when a click precedes the stored onset. For a final `yes`, every
 submitted event has `final_valid = true` and `overridden = false`; formal
-positive summaries use the first such event. For a final `no`, prior clicks are
-retained for audit but have `final_valid = false` and `overridden = true`; the
-response has null detection fields. A no-click negative response has no event
-rows.
+positive summaries use the first such event. For a final `no`, pending marks are
+discarded before submission and no event rows are created; the response has null
+detection fields. A no-click negative response also has no event rows.
 
-Anonymous clients receive `EXECUTE` only on the enrollment-checked queue and
-submission RPCs. Direct table and identity-sequence privileges are revoked from
+Anonymous clients receive `EXECUTE` only on the queue and submission RPCs.
+Direct table and identity-sequence privileges are revoked from
 `PUBLIC`, `anon`, and `authenticated`, so the functions are the only boundaries
 that can create queues or derive `correct`, timing, onset, and finalization
-fields. Browser roles have no direct access to `assessment_enrollments`,
-`assessment_session_access`, `responses`, `lesion_detection_events`,
-`assessment_queue`, or `videos`. The start/resume RPC returns queue identity and
+fields. Browser roles have no direct access to `responses`,
+`lesion_detection_events`, `assessment_queue`, or `videos`. The start/resume RPC returns queue identity and
 progress only; it never returns Storage paths, `has_lesion`, or
 `lesion_onset_sec`.
 
-The access code must be at least 20 characters and match an active enrollment
-whose `study_mode` equals protected runtime configuration. Missing, inactive,
-wrong-code, and wrong-mode enrollments produce the same credential error.
-`assessment_session_access` stores the matched digest and mode under a composite
-foreign key, so a runtime-mode change cannot silently relabel an existing
-session.
-
-`authorize_current_assessment_video(text, integer, integer, text)` is granted
+`authorize_current_assessment_video(text, integer, integer)` is granted
 only to `service_role`. It returns one `bucket` and `file_path` only when the
 requested order is the first unanswered queue item. Completed, previous,
-skipped, future, wrong-code, and wrong-mode requests fail. The former global
+skipped, and future requests fail. The former global
 Storage helper and anonymous `storage.objects` `SELECT` policy are removed, so
 the publishable browser client cannot list, sign, or download private videos.
 
@@ -202,19 +152,21 @@ The participant workflow permits repeated lesion clicks only after playback
 starts, including while playback is paused. Final controls are unavailable until
 the actual HTML5 `ended` event. Then `Next video` is enabled only when at least
 one click exists and submits `yes`; `No lesion detected` is always available and
-submits `no`, overriding any prior clicks and clearing their visible markers.
-Completed videos do not expose forward seek, replay, or redo controls.
+submits `no`, discarding any prior unsubmitted clicks and clearing their visible
+markers. Before the first actual `ended` event, the player blocks forward
+seeking beyond naturally watched content while allowing backward seeking within
+watched content. After that event, replay and free seeking are available until
+the final response is submitted. Submitted videos cannot be replayed or redone.
 
 Final controls lock while the RPC is in progress. If it fails, the exact pending
 submission remains immutable and retryable without advancing the queue. A failed
-positive retry retains all final-valid clicks. A failed overridden-negative retry
-retains its raw overridden clicks even though the visible click count remains
-cleared. The queue advances only after the RPC succeeds.
+positive retry retains all final-valid clicks. A failed negative retry retains
+the immutable no-lesion submission while the discarded marks remain absent.
+The queue advances only after the RPC succeeds.
 
 Refreshing or reopening the assessment with the same `participant_id` +
-`session_number` + coordinator-issued access code resumes from the first
-persisted unanswered queue item returned by the start/resume RPC. The code is
-stable across tabs and devices; no browser-generated credential is used.
+`session_number` resumes from the first persisted unanswered queue item returned
+by the start/resume RPC.
 If all queued videos already have responses, the completion page is shown
 immediately. A completed `participant_id` + `session_number` is terminal and
 cannot be restarted; the same participant can still start a different session
@@ -230,8 +182,8 @@ configuration.
 
 The anonymous browser client does not read `public.responses`,
 `public.lesion_detection_events`, `public.assessment_queue`, `public.videos`,
-`public.assessment_enrollments`, or `public.assessment_session_access`. Resume
-recovery is handled by the database-side start/resume function without granting
+or `public.assessment_runtime_config`. Resume recovery is handled by the
+database-side start/resume function without granting
 anonymous users direct table access.
 
 The app never uses a local `/videos/...` path. Video URLs are generated at
@@ -239,6 +191,20 @@ runtime by a trusted Edge Function after the service-role-only current-video
 RPC authorizes the first unanswered queue order. Supabase Storage then creates a
 temporary signed URL for that single `bucket/file_path`; the browser cannot sign
 the queue itself.
+
+## Fully offline LOCAL operation
+
+When `ASSESSMENT_DEPLOYMENT_MODE=local`, the same assessment UI uses a sealed
+study package, local MP4 streaming, and durable SQLite persistence. This mode
+does not require Supabase or Internet access and must be bound to
+`127.0.0.1`. Participant input remains limited to Participant ID and Session
+1/2/3; study mode and the FORMAL roster come only from the sealed package.
+
+See [`docs/local-offline-operator-runbook.md`](docs/local-offline-operator-runbook.md)
+for package preparation, environment configuration, startup, backup, recovery,
+and readiness boundaries. The synthetic `40 + 40 + 40` software validation does
+not make the real FORMAL package operationally ready; the real 120 videos and
+final participant roster still require separate validation.
 
 ## Production deployment
 

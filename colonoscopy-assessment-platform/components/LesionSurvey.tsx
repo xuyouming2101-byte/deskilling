@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Ban, ScanSearch } from "lucide-react";
+import { ArrowRight, Ban, ScanSearch, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo } from "react";
 import { Model } from "survey-core";
 import type {
@@ -17,6 +17,7 @@ type LesionSurveyProps = {
   canGoNext: boolean;
   locked: boolean;
   onDetect: () => void;
+  onDeleteMark: (clickIndex: number) => void;
   onFinalizeYes: () => void;
   onFinalizeNo: (clickedAtMs: number) => void;
 };
@@ -37,6 +38,7 @@ export default function LesionSurvey({
   canGoNext,
   locked,
   onDetect,
+  onDeleteMark,
   onFinalizeYes,
   onFinalizeNo
 }: LesionSurveyProps) {
@@ -86,6 +88,13 @@ export default function LesionSurvey({
     const noClickedAtMs = performance.now();
 
     if (
+      clickCount > 0 &&
+      !window.confirm("现有 marks 将不会被记录。是否继续？")
+    ) {
+      return;
+    }
+
+    if (
       canReportNoLesion &&
       !locked &&
       validateFinalClassification("no")
@@ -122,8 +131,20 @@ export default function LesionSurvey({
           ) : (
             clicks.map((click) => (
               <li key={click.click_index}>
-                <span>Mark {click.click_index}</span>
+                <span className="detection-times__label">
+                  Mark {click.click_index}
+                </span>
                 <time>{formatVideoTime(click.video_time_at_click)}</time>
+                <button
+                  aria-label={`Delete mark ${click.click_index}`}
+                  className="detection-times__delete"
+                  disabled={locked}
+                  onClick={() => onDeleteMark(click.click_index)}
+                  title={`Delete mark ${click.click_index}`}
+                  type="button"
+                >
+                  <Trash2 aria-hidden="true" />
+                </button>
               </li>
             ))
           )}

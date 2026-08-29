@@ -129,7 +129,12 @@ h2 {
   box-shadow: 0 8px 22px rgba(21, 24, 23, 0.06);
 }
 
-.intake-grid,
+.intake-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 720px);
+  justify-content: center;
+}
+
 .assessment-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
@@ -398,19 +403,45 @@ h2 {
 }
 
 .assessment-video-player__progress {
+  appearance: none;
   width: 100%;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.17);
+  height: 18px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
-.assessment-video-player__progress span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
+.assessment-video-player__progress::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--teal) 0,
+    var(--teal) var(--playback-progress),
+    rgba(255, 255, 255, 0.17) var(--playback-progress),
+    rgba(255, 255, 255, 0.17) 100%
+  );
+}
+
+.assessment-video-player__progress::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
   background: var(--teal);
-  transition: width 160ms linear;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.assessment-video-player__progress:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 3px;
+}
+
+.assessment-video-player__progress:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .assessment-video-player__time {
@@ -558,9 +589,32 @@ h2 {
 }
 
 .detection-times time {
+  margin-left: auto;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
   font-weight: 820;
+}
+
+.detection-times__delete {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #8a2520;
+}
+
+.detection-times__delete:hover:not(:disabled) {
+  border-color: #e6bbb7;
+  background: #fff0ee;
+}
+
+.detection-times__delete svg {
+  width: 16px;
+  height: 16px;
 }
 
 .detection-times .detection-times__empty {
@@ -742,10 +796,6 @@ h2 {
   .intake-grid,
   .assessment-grid {
     grid-template-columns: 1fr;
-  }
-
-  .protocol-panel {
-    order: -1;
   }
 }
 

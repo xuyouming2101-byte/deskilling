@@ -427,6 +427,25 @@ export class LocalAssessmentRepository
       };
     }
 
+    const latestCompleted = this.db
+      .prepare(
+        `SELECT attempt_id
+         FROM local_assessment_attempts
+         WHERE participant_id = ? AND session_number = ? AND status = 'completed'
+         ORDER BY completed_at DESC, created_at DESC, attempt_id DESC
+         LIMIT 1`
+      )
+      .get(input.participantId, input.sessionNumber) as
+      | { attempt_id: string }
+      | undefined;
+
+    if (latestCompleted) {
+      return {
+        kind: "session",
+        session: this.loadSession(latestCompleted.attempt_id)
+      };
+    }
+
     return { kind: "session", session: this.createAttempt(input) };
   }
 

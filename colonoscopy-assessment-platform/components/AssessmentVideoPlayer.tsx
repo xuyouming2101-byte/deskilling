@@ -3,10 +3,11 @@
 import {
   Pause,
   Play,
-  Volume2,
-  VolumeX
+  RotateCcw
 } from "lucide-react";
 import {
+  type CSSProperties,
+  type FormEvent,
   forwardRef,
   useCallback,
   useEffect,
@@ -16,7 +17,7 @@ import {
 } from "react";
 
 export type AssessmentVideoPlayerProps = {
-  signedUrl: string;
+  playbackUrl: string;
   videoId: string;
   locked: boolean;
   onPlaybackStarted: () => void;
@@ -60,7 +61,7 @@ const AssessmentVideoPlayer = forwardRef<
   AssessmentVideoPlayerProps
 >(function AssessmentVideoPlayer(
   {
-    signedUrl,
+    playbackUrl,
     videoId,
     locked,
     onPlaybackStarted,
@@ -73,9 +74,8 @@ const AssessmentVideoPlayer = forwardRef<
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const playbackStartedRef = useRef(false);
   const endedRef = useRef(false);
+  const maxWatchedTimeRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [videoEnded, setVideoEnded] = useState(false);
   const [position, setPosition] = useState<PlaybackPosition>(initialPosition);
 
   const setVideoRef = useCallback(
@@ -102,13 +102,13 @@ const AssessmentVideoPlayer = forwardRef<
   useEffect(() => {
     playbackStartedRef.current = false;
     endedRef.current = false;
+    maxWatchedTimeRef.current = 0;
     setIsPlaying(false);
-    setVideoEnded(false);
     setPosition(initialPosition);
-  }, [videoId, signedUrl]);
+  }, [videoId, playbackUrl]);
 
   const handlePlay = () => {
-    if (endedRef.current || locked) {
+    if (locked) {
       videoRef.current?.pause();
       return;
     }
@@ -128,52 +128,121 @@ const AssessmentVideoPlayer = forwardRef<
   };
 
   const handleEnded = () => {
-    if (endedRef.current) {
+    const endedAtMs = performance.now();
+    const shouldNotifyParent = !endedRef.current;
+
+    if (shouldNotifyParent) {
+      endedRef.current = true;
+      maxWatchedTimeRef.current = videoRef.current?.duration ?? 0;
+    }
+
+    setIsPlaying(false);
+    onPlaybackStateChange(false);
+
+    if (shouldNotifyParent) {
+      onEnded(endedAtMs);
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    const video = videoRef.current;
+
+    if (video && !endedRef.current && !video.seeking) {
+      maxWatchedTimeRef.current = Math.max(
+        maxWatchedTimeRef.current,
+        video.currentTime
+      );
+    }
+
+    syncPosition();
+  };
+
+  const handleSeeking = () => {
+    const video = videoRef.current;
+
+    if (
+      !video ||
+      endedRef.current ||
+      video.currentTime <= maxWatchedTimeRef.current
+    ) {
       return;
     }
 
-    const endedAtMs = performance.now();
-    endedRef.current = true;
-    setIsPlaying(false);
-    setVideoEnded(true);
-    onPlaybackStateChange(false);
-    onEnded(endedAtMs);
+    video.currentTime = maxWatchedTimeRef.current;
+    syncPosition();
+  };
+
+  const requestPlayback = (video: HTMLVideoElement) => {
+    void video.play().catch((error: unknown) => {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+
+      onVideoError();
+    });
   };
 
   const togglePlayback = () => {
     const video = videoRef.current;
 
-    if (!video || locked || endedRef.current) {
+    if (!video || locked) {
       return;
     }
 
     if (video.paused) {
-      void video.play().catch(onVideoError);
+      if (video.ended) {
+        video.currentTime = 0;
+        syncPosition();
+      }
+
+      requestPlayback(video);
       return;
     }
 
     video.pause();
   };
 
-  const toggleMute = () => {
+  const replayVideo = () => {
     const video = videoRef.current;
 
-    if (!video) {
+    if (!video || locked) {
       return;
     }
 
-    const nextMuted = !video.muted;
-    video.muted = nextMuted;
-    setIsMuted(nextMuted);
+    video.currentTime = 0;
+    syncPosition();
+    requestPlayback(video);
+  };
+
+  const seekVideo = (event: FormEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+
+    if (!video || locked) {
+      return;
+    }
+
+    const nextTime = Number(event.currentTarget.value);
+
+    if (!Number.isFinite(nextTime)) {
+      return;
+    }
+
+    const duration = Number.isFinite(video.duration)
+      ? video.duration
+      : nextTime;
+    const seekLimit = endedRef.current
+      ? duration
+      : maxWatchedTimeRef.current;
+    video.currentTime = Math.min(Math.max(0, nextTime), seekLimit);
+    syncPosition();
   };
 
   const progressPercent =
     position.duration > 0
       ? Math.min(100, Math.max(0, (position.currentTime / position.duration) * 100))
       : 0;
-  const playbackLocked = locked || videoEnded;
+  const playbackLocked = locked;
   const playPauseLabel = isPlaying ? "Pause video" : "Play video";
-  const muteLabel = isMuted ? "Unmute video" : "Mute video";
 
   return (
     <section
@@ -185,17 +254,17 @@ const AssessmentVideoPlayer = forwardRef<
         ref={setVideoRef}
         aria-label={`Video ${videoId}`}
         disablePictureInPicture
-        muted={isMuted}
         onDurationChange={syncPosition}
         onEnded={handleEnded}
         onError={onVideoError}
         onLoadedMetadata={syncPosition}
         onPause={handlePause}
         onPlay={handlePlay}
-        onTimeUpdate={syncPosition}
+        onSeeking={handleSeeking}
+        onTimeUpdate={handleTimeUpdate}
         playsInline
         preload="metadata"
-        src={signedUrl}
+        src={playbackUrl}
       />
 
       <div className="assessment-video-player__controls">
@@ -211,27 +280,32 @@ const AssessmentVideoPlayer = forwardRef<
             {isPlaying ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
           </button>
           <button
-            aria-label={muteLabel}
+            aria-label="Replay video"
             className="assessment-video-player__icon-button"
-            onClick={toggleMute}
-            title={muteLabel}
+            disabled={playbackLocked}
+            onClick={replayVideo}
+            title="Replay video"
             type="button"
           >
-            {isMuted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+            <RotateCcw aria-hidden="true" />
           </button>
         </div>
 
         <div className="assessment-video-player__timeline">
-          <div
-            aria-label="Playback progress"
-            aria-valuemax={Math.round(position.duration)}
-            aria-valuemin={0}
-            aria-valuenow={Math.round(position.currentTime)}
+          <input
+            aria-label="Seek video"
             className="assessment-video-player__progress"
-            role="progressbar"
-          >
-            <span style={{ width: `${progressPercent}%` }} />
-          </div>
+            disabled={playbackLocked || position.duration <= 0}
+            max={position.duration || 0}
+            min={0}
+            onInput={seekVideo}
+            step={0.001}
+            style={
+              { "--playback-progress": `${progressPercent}%` } as CSSProperties
+            }
+            type="range"
+            value={Math.min(position.currentTime, position.duration || 0)}
+          />
           <div className="assessment-video-player__time" aria-live="off">
             <span>{formatPlaybackTime(position.currentTime)}</span>
             <span>{formatPlaybackTime(position.duration)}</span>

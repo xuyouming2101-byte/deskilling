@@ -4,7 +4,8 @@ import {
   buildSubmissionRpcParams,
   buildVideoSubmission,
   createLesionDetectionClick,
-  getResponseActionState
+  getResponseActionState,
+  removeLesionDetectionClick
 } from "./lesionResponse.ts";
 
 const identity = {
@@ -41,7 +42,7 @@ test("records repeated clicks with independent media and performance timing", ()
   ]);
 });
 
-test("enables final actions only after the video ends", () => {
+test("keeps lesion detection active after the video ends for replay marks", () => {
   assert.deepEqual(
     getResponseActionState({
       videoStarted: true,
@@ -58,7 +59,7 @@ test("enables final actions only after the video ends", () => {
       clickCount: 2,
       locked: false
     }),
-    { canDetect: false, canReportNoLesion: true, canGoNext: true }
+    { canDetect: true, canReportNoLesion: true, canGoNext: true }
   );
   assert.deepEqual(
     getResponseActionState({
@@ -67,8 +68,22 @@ test("enables final actions only after the video ends", () => {
       clickCount: 0,
       locked: false
     }),
-    { canDetect: false, canReportNoLesion: true, canGoNext: false }
+    { canDetect: true, canReportNoLesion: true, canGoNext: false }
   );
+});
+
+test("deletes an unsubmitted mark and reindexes the remaining marks", () => {
+  const clicks = [
+    { click_index: 1, video_time_at_click: 1.25, response_time_ms: 1_300 },
+    { click_index: 2, video_time_at_click: 2.5, response_time_ms: 2_600 },
+    { click_index: 3, video_time_at_click: 3.75, response_time_ms: 3_900 }
+  ];
+
+  assert.deepEqual(removeLesionDetectionClick(clicks, 2), [
+    { click_index: 1, video_time_at_click: 1.25, response_time_ms: 1_300 },
+    { click_index: 2, video_time_at_click: 3.75, response_time_ms: 3_900 }
+  ]);
+  assert.equal(clicks[1].click_index, 2);
 });
 
 test("disables every action before playback starts", () => {
@@ -122,7 +137,7 @@ test("positive summary uses the first valid lesion click", () => {
   assert.equal(submission.clicks.length, 2);
 });
 
-test("negative summary has no detection time and preserves overridden raw clicks", () => {
+test("negative summary has no detection time and omits discarded marks", () => {
   const rawClick = {
     click_index: 1,
     video_time_at_click: 2.125,
@@ -140,7 +155,8 @@ test("negative summary has no detection time and preserves overridden raw clicks
   assert.equal(submission.final_answer, false);
   assert.equal(submission.response_time_ms, 8_125);
   assert.equal(submission.no_response_latency_ms, 1_125);
-  assert.deepEqual(submission.clicks, [rawClick]);
+  assert.deepEqual(submission.clicks, []);
+  assert.equal(rawClick.click_index, 1);
 });
 
 test("builds a deeply immutable pending submission snapshot", () => {
@@ -153,7 +169,7 @@ test("builds a deeply immutable pending submission snapshot", () => {
   ];
   const submission = buildVideoSubmission({
     ...identity,
-    finalClassification: "no",
+    finalClassification: "yes",
     clicks: rawClicks,
     nowMs: 9_125,
     playbackStartedAtMs: 1_000,
@@ -183,7 +199,7 @@ test("rejects a positive final classification without lesion clicks", () => {
   );
 });
 
-test("maps a final submission and access code to the exact RPC parameter contract", () => {
+test("strips negative marks at the RPC boundary", () => {
   const params = buildSubmissionRpcParams({
     ...identity,
     final_answer: false,
@@ -197,7 +213,7 @@ test("maps a final submission and access code to the exact RPC parameter contrac
         response_time_ms: 4_100
       }
     ]
-  }, "coordinator-access-code-that-is-long-enough");
+  });
 
   assert.deepEqual(params, {
     p_participant_id: "P001",
@@ -208,18 +224,11 @@ test("maps a final submission and access code to the exact RPC parameter contrac
     p_response_time_ms: 8_125,
     p_no_response_latency_ms: 1_125,
     p_video_completed: true,
-    p_access_code: "coordinator-access-code-that-is-long-enough",
-    p_clicks: [
-      {
-        click_index: 1,
-        video_time_at_click: 2.125,
-        response_time_ms: 4_100
-      }
-    ]
+    p_clicks: []
   });
 });
 
-test("maps an identical submission and access code to identical retry parameters", () => {
+test("maps an identical submission to identical retry parameters", () => {
   const submission = buildVideoSubmission({
     ...identity,
     finalClassification: "no",
@@ -228,10 +237,8 @@ test("maps an identical submission and access code to identical retry parameters
     playbackStartedAtMs: 1_000,
     videoEndedAtMs: 8_000
   });
-  const accessCode = "one-fixed-coordinator-code-for-every-retry";
-
-  const firstAttempt = buildSubmissionRpcParams(submission, accessCode);
-  const retryAttempt = buildSubmissionRpcParams(submission, accessCode);
+  const firstAttempt = buildSubmissionRpcParams(submission);
+  const retryAttempt = buildSubmissionRpcParams(submission);
 
   assert.deepEqual(retryAttempt, firstAttempt);
   assert.deepEqual(retryAttempt, {
@@ -243,7 +250,6 @@ test("maps an identical submission and access code to identical retry parameters
     p_response_time_ms: 8_125,
     p_no_response_latency_ms: 1_125,
     p_video_completed: true,
-    p_access_code: "one-fixed-coordinator-code-for-every-retry",
     p_clicks: []
   });
 });

@@ -394,6 +394,31 @@ test("stores a no-lesion response without detection time and completes the attem
       (db.prepare("SELECT status FROM local_assessment_attempts WHERE attempt_id = ?").get(ATTEMPT_1) as { status: string }).status,
       "completed"
     );
+    const resumedCompleted = await repository.createOrResumeAttempt({
+      participantId: "DEV001",
+      sessionNumber: 1
+    });
+    assert.equal(resumedCompleted.kind, "session");
+    assert.deepEqual(
+      resumedCompleted.kind === "session"
+        ? {
+            attemptId: resumedCompleted.session.attemptId,
+            status: resumedCompleted.session.status,
+            isComplete: resumedCompleted.session.isComplete,
+            nextVideoOrder: resumedCompleted.session.nextVideoOrder
+          }
+        : null,
+      {
+        attemptId: ATTEMPT_1,
+        status: "completed",
+        isComplete: true,
+        nextVideoOrder: 3
+      }
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS count FROM local_assessment_attempts").get() as { count: number }).count,
+      1
+    );
     await assert.rejects(
       () => repository.authorizeCurrentVideo(ATTEMPT_1, 2),
       /not current or is not in progress/

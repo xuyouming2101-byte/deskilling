@@ -14,6 +14,11 @@ const assessmentTypesSource = readFileSync(
   new URL("../lib/assessmentTypes.ts", import.meta.url),
   "utf8"
 );
+const browserGatewaySource = readFileSync(
+  new URL("../lib/assessment/browserAssessmentGateway.ts", import.meta.url),
+  "utf8"
+);
+const pageSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 const supabaseClientSource = readFileSync(
   new URL("../lib/supabaseClient.ts", import.meta.url),
   "utf8"
@@ -87,21 +92,35 @@ function assertLexicalOrder(body, statements) {
   }
 }
 
-test("integrates the seek-free player and atomic submission client", () => {
+test("integrates the player through a source-neutral assessment gateway", () => {
   assert.match(assessmentClientSource, /import AssessmentVideoPlayer/);
   assert.match(assessmentClientSource, /<AssessmentVideoPlayer/);
-  assert.match(assessmentClientSource, /submitVideoResponse/);
+  assert.match(assessmentClientSource, /createBrowserAssessmentGateway/);
+  assert.match(assessmentClientSource, /gateway\.submitResponse/);
+  assert.match(pageSource, /<AssessmentClient deploymentMode=\{deploymentMode\}/);
   assert.doesNotMatch(assessmentClientSource, /<video\b/);
 });
 
-test("uses the safe queue RPC with a coordinator-issued access code", () => {
+test("keeps LOCAL participant intake limited to ID and Session 1/2/3", () => {
+  assert.match(assessmentClientSource, />Participant ID</);
+  assert.match(assessmentClientSource, />Session number</);
+  assert.doesNotMatch(
+    assessmentClientSource,
+    /Study access code|type="password"|SERVER CONTROLLED|Supabase ready|Supabase not configured|public\.responses|Private Supabase Storage/
+  );
+  assert.doesNotMatch(
+    browserGatewaySource,
+    /study_mode|session_pool|is_test|has_lesion|lesion_onset|correct|detection_latency/
+  );
+});
+
+test("uses the safe queue RPC without a study access code", () => {
   assert.match(supabaseClientSource, /start_or_resume_assessment/);
   assert.match(supabaseClientSource, /buildStartOrResumeRpcParams/);
-  assert.match(assessmentClientSource, /validateAssessmentAccessCode/);
-  assert.match(assessmentClientSource, /loadAssessmentSession\([\s\S]*accessCode/);
-  assert.match(assessmentClientSource, /submitVideoResponse\(submission, accessCode\)/);
-  assert.match(assessmentClientSource, /type="password"/);
-  assert.match(assessmentClientSource, />Study access code</);
+  assert.match(assessmentClientSource, /gateway\.startOrResume/);
+  assert.match(assessmentClientSource, /gateway\.submitResponse/);
+  assert.doesNotMatch(componentAndLibSource, /accessCode|access_code|Study access code/i);
+  assert.doesNotMatch(assessmentClientSource, /type="password"/);
   assert.doesNotMatch(supabaseClientSource, /\.from\(["']videos["']\)/);
   assert.doesNotMatch(supabaseClientSource, /\.from\(["']assessment_queue["']\)/);
   assert.doesNotMatch(componentAndLibSource, /has_lesion|lesion_onset_sec|hasLesion|lesionOnsetSec|detection_latency_ms/);
@@ -109,27 +128,16 @@ test("uses the safe queue RPC with a coordinator-issued access code", () => {
   assert.doesNotMatch(supabaseClientSource, staleStudyModePattern);
 });
 
-test("keeps the access code in memory without browser persistence or secret logs", () => {
+test("does not persist participant assessment state in browser storage", () => {
   assert.doesNotMatch(sessionConfigSource, /localStorage|sessionStorage|getRandomValues/);
   assert.doesNotMatch(assessmentClientSource, /localStorage|sessionStorage|getRandomValues/);
-  assert.doesNotMatch(componentAndLibSource, /console\.(?:log|warn|error)\([^)]*accessCode/s);
   assert.doesNotMatch(edgeFunctionSource, /console\.(?:log|warn|error)/);
 });
 
-test("validates the coordinator access code before loading a queue", () => {
+test("loads the queue after validating participant and session", () => {
   const startBody = getFunctionBody(assessmentClientSource, "startAssessment");
 
-  assert.match(startBody, /try\s*\{/);
-  assert.match(startBody, /validateAssessmentAccessCode/);
-  assert.match(startBody, /catch(?:\s*\([^)]*\))?\s*\{/);
-  assert.match(startBody, /setIntakeError\(/);
-});
-
-test("keeps a rejected access-code start on the intake screen", () => {
-  const startBody = getFunctionBody(assessmentClientSource, "startAssessment");
-
-  assert.match(startBody, /loadQueue\(normalizedAccessCode\)\.catch/);
-  assert.match(startBody, /accessCodeRef\.current = null;/);
+  assert.match(startBody, /loadQueue\(\)\.catch/);
   assert.match(startBody, /setIntakeError\(/);
   assert.match(startBody, /setPhase\("intake"\);/);
 });
@@ -165,10 +173,12 @@ test("captures ended time and repeated click indexes through refs before state",
   ]);
 });
 
-test("builds no before clearing visible clicks and retries the same object", () => {
+test("omits marks from no submissions before clearing the visible list", () => {
   const finalizeBody = getFunctionBody(assessmentClientSource, "finalizeVideo");
   assertLexicalOrder(finalizeBody, [
+    'const clicksToSubmit = finalClassification === "no"',
     "const submission = buildVideoSubmission(",
+    "clicks: clicksToSubmit,",
     "setPendingSubmission(submission);",
     'if (finalClassification === "no")',
     "detectionClicksRef.current = [];",
@@ -179,6 +189,17 @@ test("builds no before clearing visible clicks and retries the same object", () 
   const retryBody = getFunctionBody(assessmentClientSource, "retrySubmission");
   assert.match(retryBody, /submitPendingSubmission\(pendingSubmission\)/);
   assert.doesNotMatch(retryBody, /performance\.now|buildVideoSubmission/);
+});
+
+test("lets participants delete pending marks and confirms no when marks exist", () => {
+  assert.match(lesionSurveySource, /onDeleteMark/);
+  assert.match(lesionSurveySource, /aria-label=\{`Delete mark \$\{click\.click_index\}`\}/);
+  assert.match(
+    lesionSurveySource,
+    /window\.confirm\("现有 marks 将不会被记录。是否继续？"\)/
+  );
+  assert.match(assessmentClientSource, /removeLesionDetectionClick/);
+  assert.match(assessmentClientSource, /onDeleteMark=\{handleDeleteMark\}/);
 });
 
 test("captures the no-response timestamp before SurveyJS validation", () => {
@@ -206,28 +227,28 @@ test("signs only the current video through the service-role Edge Function", () =
   assert.doesNotMatch(edgeFunctionSource, /signed_url[^\n]*console|access_code[^\n]*console/i);
 });
 
-test("uses custom access-code authorization for the publishable-key Edge Function", () => {
+test("uses the current-video authorization RPC from the publishable-key Edge Function", () => {
   assert.match(
     supabaseConfigSource,
     /\[functions\.issue-assessment-video-url\]\s*verify_jwt\s*=\s*false/s
   );
-  assert.match(edgeFunctionSource, /accessCode\.length < 20/);
-  assert.match(edgeFunctionSource, /p_access_code: accessCode/);
+  assert.doesNotMatch(edgeFunctionSource, /accessCode|access_code/i);
+  assert.match(edgeFunctionSource, /p_video_order: videoOrder/);
 });
 
 test("loads the server-authorized next video only after response commit", () => {
   const submitBody = getFunctionBody(assessmentClientSource, "submitPendingSubmission");
 
   assertLexicalOrder(submitBody, [
-    "await submitVideoResponse(submission, accessCode);",
-    "await loadQueue(accessCode);"
+    "await gateway.submitResponse(currentAttemptId, submission);",
+    "await loadQueue(currentAttemptId);"
   ]);
 });
 
 test("keeps the locked video visible while loading the next signed URL", () => {
   const loadBody = getFunctionBody(assessmentClientSource, "loadQueue");
 
-  assert.doesNotMatch(loadBody, /setSignedVideoUrl\(""\)/);
+  assert.doesNotMatch(loadBody, /setPlaybackUrl\(""\)/);
 });
 
 test("keeps SurveyJS as validation boundary while rendering custom controls", () => {

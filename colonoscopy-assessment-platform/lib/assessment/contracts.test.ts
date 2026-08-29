@@ -288,6 +288,6 @@ test("selects repositories only for the explicit deployment mode", () => {
 test("rechecks the server deployment mode at the page boundary", () => {
   assert.match(pageSource, /export const dynamic = "force-dynamic"/);
   assert.match(pageSource, /readDeploymentMode\(\)/);
-  assert.match(pageSource, /deploymentMode === "online"/);
+  assert.match(pageSource, /<AssessmentClient deploymentMode=\{deploymentMode\}/);
   assert.doesNotMatch(pageSource, /NEXT_PUBLIC_ASSESSMENT_DEPLOYMENT_MODE/);
 });

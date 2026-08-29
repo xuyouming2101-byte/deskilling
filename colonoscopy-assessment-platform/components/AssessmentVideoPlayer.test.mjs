@@ -36,23 +36,47 @@ test("captures the ended timestamp before mutating state or notifying parents", 
     "const endedAtMs = performance.now();",
     "endedRef.current = true;",
     "setIsPlaying(false);",
-    "setVideoEnded(true);",
     "onPlaybackStateChange(false);",
     "onEnded(endedAtMs);"
   ]);
 });
 
-test("keeps the player seek-free and bound to real media events", () => {
+test("limits first-pass seeking to watched content and unlocks after real ended", () => {
   const videoTag = source.match(/<video\b[\s\S]*?\/>/)?.[0];
 
   assert.ok(videoTag, "Expected a video JSX element.");
   assert.doesNotMatch(videoTag, /\bcontrols(?:\s|=|\/?>)/);
-  assert.doesNotMatch(source, /\bcurrentTime\s*=/);
+  assert.match(source, /maxWatchedTimeRef/);
+  assert.match(source, /endedRef\.current\s*\?/);
+  assert.match(
+    source,
+    /const seekLimit = endedRef\.current[\s\S]*maxWatchedTimeRef\.current;[\s\S]*Math\.min\(Math\.max\(0, nextTime\), seekLimit\)/
+  );
+  assert.match(source, /const handleSeeking/);
+  assert.match(videoTag, /onSeeking=\{handleSeeking\}/);
+  assert.match(source, /\bcurrentTime\s*=/);
   assert.doesNotMatch(source, /\bfastSeek\s*\(/);
-  assert.doesNotMatch(source, /<input\b[^>]*\btype\s*=\s*["']range["']/);
-  assert.doesNotMatch(source, /\breplay\b/i);
+  assert.match(source, /<input\b[\s\S]*?\btype\s*=\s*["']range["']/);
+  assert.match(source, /onInput=\{seekVideo\}/);
+  assert.match(source, /Replay video/);
   assert.doesNotMatch(source, /fullscreen|requestFullscreen|Maximize2/i);
   assert.match(source, /\bforwardRef\s*</);
   assert.match(videoTag, /onPlay=\{handlePlay\}/);
   assert.match(videoTag, /onEnded=\{handleEnded\}/);
+  assert.doesNotMatch(source, /if \(endedRef\.current \|\| locked\)/);
+});
+
+test("does not report an interrupted play request as a video loading error", () => {
+  assert.match(
+    source,
+    /error instanceof DOMException && error\.name === "AbortError"/
+  );
+  assert.doesNotMatch(source, /\.play\(\)\.catch\(onVideoError\)/);
+});
+
+test("omits audio controls for silent colonoscopy clips", () => {
+  assert.doesNotMatch(
+    source,
+    /Volume2|VolumeX|isMuted|toggleMute|Mute video|Unmute video|muted=/
+  );
 });
