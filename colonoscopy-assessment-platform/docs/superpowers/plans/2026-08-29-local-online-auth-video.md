@@ -2,502 +2,228 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add attempt-scoped study execution, fully offline LOCAL collection and local video streaming, explicit LOCAL-to-Supabase synchronization, and participant-password ONLINE authentication while preserving the currently deployed ECS release until a separately approved manual promotion.
+**Goal:** Deliver a genuinely usable, fully offline LOCAL emergency assessment system before making invasive live Supabase changes, then add attempt-aware synchronization, ONLINE participant authentication, and an explicitly approved release path.
 
-**Architecture:** Shared assessment components depend on `AssessmentRepository` and `VideoAccessGateway`; server-only deployment mode selects either SQLite/local-file implementations or authenticated Supabase/private-Storage implementations. Supabase changes are staged behind a compatibility bridge, and every live database stage is preceded by a read-only inventory, restored-copy rehearsal, explicit approval, and unchanged-release smoke test.
+**Architecture:** LOCAL uses server-controlled mode, a sealed study package, SQLite-native attempts, and current-order-authorized filesystem streaming; it can start, resume, and complete formal 40-video assessments without Supabase or Internet. ONLINE continues using Supabase and private Storage until a later, fully audited attempt migration and Auth release. Shared player components consume source-neutral repository and video contracts, while study mode is always selected by trusted package/server configuration rather than participant input.
 
-**Tech Stack:** Next.js 16.3, React 19, TypeScript 5.8, SurveyJS Form Library 2.5, Supabase PostgreSQL/Auth/Storage/Edge Functions, PostgreSQL, Node.js 22, `better-sqlite3@13.0.3`, `@types/better-sqlite3@9.6.0`, `canonicalize@4.0.0`, Node test runner, Playwright for real-browser verification.
+**Tech Stack:** Next.js 16.3, React 19, TypeScript 5.8, SurveyJS Form Library 2.5, Node.js 22, `better-sqlite3@13.0.3`, `@types/better-sqlite3@9.6.0`, `canonicalize@4.0.0`, Supabase PostgreSQL/Auth/Storage/Edge Functions, Node test runner, Playwright.
 
-**Spec:** `docs/superpowers/specs/2026-08-29-local-online-auth-video-design.md`
+**Spec:** `docs/superpowers/specs/2026-08-29-local-online-auth-video-design.md`, with the sequencing corrections approved after the original plan.
 
 ## Global Constraints
 
-- Treat the live Supabase schema as unknown until Phase 0 finishes from live, read-only evidence.
-- Do not infer live tables, functions, policies, Edge Functions, or applied migrations from repository SQL.
-- If Phase 0 cannot map every legacy row and current API contract safely, record `BLOCKED_BY_ENVIRONMENT` and stop before creating or applying migration SQL.
-- Never delete or silently rewrite existing `videos`, `assessment_queue`, `responses`, or `lesion_detection_events` research/test rows.
-- `main` is the only implementation branch; `release` and the running ECS remain unchanged through Phases 0-5.
-- Use inline `superpowers:executing-plans` execution with the checkpoints below; do not dispatch new subagents or per-task reviewer agents.
-- Do not execute two large phases in one approval window. Finish focused tests, standard gates, review, and explicit approval before starting the next phase.
-- Every live Supabase migration stage requires a fresh backup, restored-copy rehearsal, security review, explicit user approval, post-write verification, and unchanged `d4957edd455e7f99bc71cbde09c23254edabcfac` browser smoke test.
+- `main` is the development branch. `release` and the running ECS remain unchanged through Phases 0A-6.
+- Use inline `superpowers:executing-plans`; do not dispatch new subagents or per-task reviewer agents.
+- Complete one phase, its focused tests, standard gates, review checkpoint, and approval before starting the next phase.
+- Phase 0A performs only the lightweight live reads needed to reproduce current study semantics locally. It performs zero database writes.
+- Uncertain live migration history does not block LOCAL development, LOCAL study-package work, local-video streaming, SQLite collection, or the fully offline Phase 3 system.
+- `BLOCKED_BY_ENVIRONMENT` blocks live Supabase migration, synchronization deployment, and ONLINE Auth deployment. It does not block Phases 1-3.
+- No live Supabase migration is a prerequisite for Phases 1-3.
+- LOCAL active collection never calls Supabase or private Storage and never falls back to them.
+- ONLINE never reads LOCAL SQLite or local video files and never falls back to them.
 - `ASSESSMENT_DEPLOYMENT_MODE` is server-only and must be exactly `local` or `online`; missing or invalid values fail closed.
-- LOCAL binds only to `127.0.0.1`, never falls back to Supabase Storage, and never exposes absolute paths, SQLite access, ground truth, or service-role credentials to the browser. The transitional Phase 2 slice may use Supabase database persistence; final Phase 3 LOCAL collection must not call any Supabase service.
-- ONLINE uses Supabase Auth identity and private Supabase Storage only; it never reads LOCAL files or SQLite.
-- The same attempt never crosses runtime channels. Replacement attempts start at Video 1 and remain distinct.
-- Use exact path staging for commits because the repository already contains unrelated uncommitted work.
-- Run `npm run typecheck`, `npm test`, and `npm run build` at every phase gate.
+- Participant/browser assessment input never contains or controls `studyMode`/`study_mode`.
+- LOCAL study mode comes from the sealed package selected through server-only `LOCAL_STUDY_PACKAGE_PATH`.
+- ONLINE study mode comes from trusted database/server configuration.
+- FORMAL LOCAL participant IDs must match the approved coded-ID roster sealed into the study package. The package never contains passwords.
+- The ONLINE account pool must use exactly the same coded participant IDs as the approved FORMAL LOCAL roster.
+- Preserve existing video, queue, response, event, timing, mark, player, resume, completion, and analysis meanings.
+- Never delete or silently rewrite existing `videos`, `assessment_queue`, `responses`, or `lesion_detection_events` rows.
+- Use exact path staging because unrelated uncommitted work already exists in the repository.
+- Every phase gate runs focused tests plus `npm run typecheck`, `npm test`, and `npm run build`.
+- No CI/CD, webhook, automatic deployment, automatic `main -> release` promotion, or automatic synchronization.
+
+## Dependency Graph
+
+```text
+Phase 0A lightweight read-only semantics snapshot
+  |-- useful input for a real sealed package
+  `-- uncertainty does not block LOCAL implementation
+
+Phase 1 shared contracts + local video primitives
+  -> Phase 2 SQLite + sealed package + native local attempts
+      -> Phase 3 complete offline LOCAL experiment
+          -> usable emergency experimental system achieved
+
+Phase 4 full live preflight
+  -> restored-copy migration rehearsal
+  -> separately approved attempt-aware live migration
+      -> Phase 5 LOCAL-to-Supabase sync deployment
+      -> Phase 6 ONLINE account pool + Supabase Auth deployment
+          -> Phase 7 separately approved manual release
+```
+
+Phases 1-3 depend only on repository code, local fixtures/package files, SQLite, and local MP4 files. They do not depend on `assessment_attempts`, attempt-aware live RPCs, a live migration, Supabase connectivity, or ECS.
 
 ## Phase Gates
 
 | Gate | Required evidence | Stop condition |
 | --- | --- | --- |
-| P0 | Sanitized live inventory, raw local audit bundle, integrity results, migration-history comparison | Any inaccessible catalog, unknown RPC/owner/grant, ambiguous row mapping, or repository/live divergence without explanation produces `BLOCKED_BY_ENVIRONMENT` |
-| P1A | Stage A/B migration passes against a restored live copy; legacy contract tests and unchanged-release browser flow pass | No live migration without a separate explicit approval |
-| P1B | Stage A/B live post-checks and unchanged-release smoke tests pass | Stage C remains prohibited until another explicit approval |
-| P1C | Attempt-scoped constraints pass rehearsal and approved live window | Do not remove legacy access APIs |
-| P2 | Connected LOCAL vertical slice passes local Range/player tests with dedicated test IDs | Do not treat this transitional Supabase-backed slice as offline-ready |
-| P3 | Full LOCAL attempt completes and resumes with network disabled | Do not add synchronization until SQLite integrity/export is accepted |
-| P4 | Sync Cases A-E, rollback, idempotency, and validity auditing pass | Do not expose ONLINE Auth until sync migration is separately approved |
-| P5 | ONLINE Auth, ownership, private video, and complete study flow pass | Do not modify `release` or ECS |
-| P6 | Explicit promotion approval and recorded known-good SHA | No automatic deployment and no delayed access-code cleanup in the same release |
+| P0A | Read-only schema/semantic snapshot or explicit list of missing live evidence | Missing/uncertain evidence is recorded but LOCAL implementation continues; real FORMAL package sealing waits for required metadata |
+| P1 | Fail-closed mode, source-neutral contracts, path containment, Range/206 route | No Supabase migration or persistence dependency allowed |
+| P2 | Durable SQLite attempt lifecycle plus validated sealed package and participant roster | No browser-controlled study mode; no unknown FORMAL participant ID |
+| P3 | New 40-video FORMAL attempt completes and resumes with network disabled | LOCAL emergency system must be operational before Phase 4 |
+| P4A | Exhaustive live audit maps catalogs, data integrity, functions, permissions, Storage, Edge Functions, and migration history | Ambiguity yields `BLOCKED_BY_ENVIRONMENT`; LOCAL remains usable |
+| P4B | Backup, restored-copy rehearsal, unchanged-release compatibility proof | No live migration without separate explicit approval |
+| P4C | Approved migration post-check and unchanged ECS-release smoke test | Sync/Auth deployment remains blocked on failure |
+| P5 | Atomic/idempotent sync and conflict/validity cases pass | No partial import or silent overwrite |
+| P6 | Participant Auth ownership and private-video flow pass | Do not modify `release` or ECS |
+| P7 | Explicitly approved commit set and recorded rollback SHA | Manual promotion/deployment only |
 
 ## Planned File Map
 
-### Phase 0 and migration proof
+### Phase 0A
 
-- Create `scripts/supabase/live-preflight.sql`: one read-only PostgreSQL catalog/data audit.
-- Create `scripts/supabase/verify-preflight-report.mjs`: require every inventory section and calculate report hashes.
-- Create `scripts/supabase/compare-live-repository.mjs`: compare live migration/function fingerprints with repository SQL without asserting equivalence from filenames.
-- Create `scripts/supabase/preflight-tools.test.mjs`: sanitized parser, completeness, and secret-leak fixtures.
-- Modify `.gitignore`: exclude raw `artifacts/supabase-preflight/` and database dumps.
-- Create `docs/superpowers/audits/2026-08-29-live-supabase-preflight.md`: sanitized conclusions and the P0 verdict only.
-- Create migration files only through `supabase migration new`: Stage A attempts, Stage B legacy bridge, Stage C attempt constraints, Phase 4 sync, Phase 5 Auth, and delayed Stage D cleanup.
-- Create `supabase/assessment_attempts.contract.test.mjs`: migration and compatibility assertions.
-- Create `supabase/fixtures/legacy-live-shape.sql`: sanitized schema/data fixture derived from live preflight.
+- Create `scripts/local-study/lightweight-live-snapshot.sql`: narrowly scoped, read-only study-semantics queries.
+- Create `scripts/local-study/validate-lightweight-snapshot.mjs`: required-section/schema validator.
+- Create `scripts/local-study/lightweight-live-snapshot.test.mjs`: sanitized fixture tests.
+- Modify `.gitignore`: exclude raw snapshots, packages, rosters, SQLite files, WAL files, dumps, and credential exports.
+- Create `docs/superpowers/audits/2026-08-29-lightweight-live-study-semantics.md`: sanitized P0A outcome.
 
-### Shared runtime boundaries
+### Phases 1-3 LOCAL
 
-- Create `lib/runtime/deploymentMode.ts`: server-only environment parser.
-- Create `lib/runtime/deploymentMode.test.ts`: fail-closed mode tests.
-- Create `lib/assessment/contracts.ts`: canonical attempt, queue, submission, repository, and error contracts.
-- Create `lib/assessment/assessmentRepositoryFactory.ts`: server-side repository selection.
-- Create `lib/video/contracts.ts`: playback source and gateway contracts.
-- Create `lib/video/videoAccessGatewayFactory.ts`: server-side gateway selection.
-- Modify `lib/assessmentTypes.ts`, `lib/lesionResponse.ts`, `lib/sessionConfig.ts`: add attempt identity without changing timing/classification semantics.
-- Modify `components/AssessmentClient.tsx`, `components/AssessmentVideoPlayer.tsx`, `components/LesionSurvey.tsx`: consume source-neutral contracts while preserving SurveyJS and player behavior.
+- Create `lib/runtime/deploymentMode.ts` and test.
+- Create `lib/assessment/contracts.ts` and test.
+- Create `lib/assessment/assessmentRepositoryFactory.ts`.
+- Create `lib/video/contracts.ts`, `rangeRequest.ts`, `localPath.ts`, and tests.
+- Create `lib/video/localVideoAccessGateway.ts`.
+- Create `app/api/local/attempts/[attemptId]/videos/[videoOrder]/route.ts` and test.
+- Modify `package.json`, `package-lock.json`, and `next.config.mjs` for pinned SQLite/canonicalization support.
+- Create `lib/local/sqlite/database.ts`, `schema.ts`, `localAssessmentRepository.ts`, and tests.
+- Create `lib/local/studyPackage.ts` and test.
+- Create `scripts/local-study/build-package.mjs` and `validate-package.mjs`.
+- Create `app/api/local/attempts/route.ts`.
+- Create `app/api/local/attempts/[attemptId]/responses/route.ts`.
+- Create `app/api/local/attempts/[attemptId]/abandon/route.ts`.
+- Create source-neutral `app/api/assessment/start/route.ts`, `response/route.ts`, and `video/route.ts`.
+- Modify `app/page.tsx`, `components/AssessmentClient.tsx`, `AssessmentVideoPlayer.tsx`, `LesionSurvey.tsx`, and current tests.
+- Create `.env.local.example` without credentials or real operator paths.
 
-### LOCAL connected and video delivery
+### Phase 4 Supabase audit and migration
 
-- Create `lib/video/rangeRequest.ts` and `lib/video/rangeRequest.test.ts`: strict single-range parser.
-- Create `lib/video/localPath.ts` and `lib/video/localPath.test.ts`: root containment and realpath/symlink enforcement.
-- Create `lib/video/localVideoAccessGateway.ts`: current-order authorization and route URL generation.
-- Create `app/api/local/attempts/[attemptId]/videos/[videoOrder]/route.ts`: LOCAL-only `GET`/`HEAD` disk streaming.
-- Create `app/api/assessment/start/route.ts`, `app/api/assessment/response/route.ts`, and `app/api/assessment/video/route.ts`: source-neutral browser API boundary.
+- Create `scripts/supabase/live-preflight.sql`, `verify-preflight-report.mjs`, `compare-live-repository.mjs`, and tests.
+- Create `docs/superpowers/audits/2026-08-29-live-supabase-preflight.md`.
+- Create migration files only through `supabase migration new` after a safe P4A verdict.
+- Create `supabase/fixtures/legacy-live-shape.sql` and `supabase/assessment_attempts.contract.test.mjs`.
 
-### LOCAL SQLite and study package
+### Phase 5 synchronization
 
-- Modify `package.json`, `package-lock.json`, and `next.config.mjs`: pin SQLite/canonicalization dependencies and externalize the native module.
-- Create `lib/local/sqlite/database.ts`: guarded database open and pragmas.
-- Create `lib/local/sqlite/schema.ts`: versioned local schema and migrations.
-- Create `lib/local/sqlite/localAssessmentRepository.ts`: transactional attempt/queue/response lifecycle.
-- Create `lib/local/sqlite/localAssessmentRepository.test.ts`: lifecycle, atomicity, retry, and recovery tests.
-- Create `lib/local/studyPackage.ts` and `lib/local/studyPackage.test.ts`: immutable manifest validation and metadata snapshot.
-- Create `scripts/local/export-study-package.mjs`: connected operator export.
-- Create `scripts/local/validate-study-package.mjs`: offline formal readiness command.
-- Create `app/api/local/attempts/route.ts`: list/create/resume LOCAL attempts.
-- Create `app/api/local/attempts/[attemptId]/responses/route.ts`: atomic local response/event submission.
-- Create `app/api/local/attempts/[attemptId]/abandon/route.ts`: explicit terminal transition.
+- Create `lib/sync/canonicalPayload.ts`, `localAttemptExporter.ts`, `syncClient.ts`, and tests.
+- Create `scripts/local-study/sync-terminal-attempt.mjs`.
+- Create a service-role-only sync migration through the Supabase CLI.
+- Create `supabase/local_attempt_sync.contract.test.mjs`.
 
-### Synchronization
+### Phase 6 ONLINE Auth
 
-- Create `lib/sync/canonicalPayload.ts` and `lib/sync/canonicalPayload.test.ts`: RFC 8785 payload and SHA-256.
-- Create `lib/sync/localAttemptExporter.ts`: immutable terminal-attempt export.
-- Create `lib/sync/syncClient.ts` and `lib/sync/syncClient.test.ts`: service-role-only RPC client and deterministic result handling.
-- Create `scripts/local/sync-terminal-attempt.mjs`: explicit operator sync command.
-- Create `supabase/local_attempt_sync.contract.test.mjs`: atomic import and Cases A-E.
+- Create private account/rate-limit and authenticated v2 RPC migrations through the Supabase CLI.
+- Create `scripts/online/provision-participant-accounts.mjs` and tests.
+- Create `supabase/functions/participant-sign-in/`.
+- Create `supabase/functions/issue-assessment-video-url-v2/`.
+- Create `lib/supabase/browserClient.ts`, `lib/online/onlineAssessmentRepository.ts`, and `lib/online/remoteVideoAccessGateway.ts`.
+- Modify participant intake and ONLINE authentication tests.
 
-### ONLINE Auth
+### Phase 7 documentation/release
 
-- Create `lib/supabase/browserClient.ts`: persisted browser Auth client using only publishable configuration.
-- Create `lib/online/onlineAssessmentRepository.ts`: authenticated v2 RPC adapter.
-- Create `lib/online/remoteVideoAccessGateway.ts`: authenticated v2 Edge Function adapter.
-- Create `supabase/functions/participant-sign-in/index.ts`: participant ID/password sign-in adapter with generic errors and rate limiting.
-- Create `supabase/functions/issue-assessment-video-url-v2/index.ts`: JWT-bound attempt/order authorization and signed URL.
-- Create `scripts/online/provision-participant-accounts.mjs`: idempotent coordinator provisioning and protected credential export.
-- Modify `components/AssessmentClient.tsx`: ONLINE participant ID/password/session intake and LOCAL participant ID/session intake.
-- Create `components/OnlineAuthentication.test.mjs`: UI and source-contract tests.
-
-### Documentation and release
-
-- Modify `.env.production.example`, `README.md`, `docs/environment-and-release-workflow.md`, and `docs/alibaba-ecs-deployment.md` only when the matching implementation phase is complete.
-- Create `.env.local.example`: non-secret LOCAL path/mode template.
-- Keep the real `.env.local`, `.env.production.local`, SQLite files, study packages, credentials, dumps, and videos outside Git.
+- Modify `.env.production.example`, `README.md`, `docs/environment-and-release-workflow.md`, and `docs/alibaba-ecs-deployment.md` only when matching behavior is complete and approved.
+- Never commit real `.env.local`, `.env.production.local`, package manifests, participant rosters, SQLite files, videos, passwords, service keys, dumps, or signed URLs.
 
 ---
 
-## Phase 0: Read-Only Live Supabase Preflight
+## Phase 0A: Lightweight Read-Only Current-State Snapshot
 
-Phase 0 is complete only when live evidence identifies all of these items explicitly: actual tables and columns; actual constraints and indexes; actual RPC names and signatures; function owners and grants; RLS state and policies; Storage policies; deployed Edge Functions; `assessment_runtime_config` rows; whether `assessment_session_access` exists; whether `assessment_enrollments` exists; current video/queue/response/event row counts; duplicate, orphan, queue-gap, and identity-integrity findings; and which repository migrations or SQL definitions are proven applied, diverged, absent, or unknown. The report must state `database_writes_performed: 0`.
-
-### Task 1: Add the read-only inventory tooling
+### Task 1: Add the narrow live-semantics snapshot
 
 **Files:**
-- Create: `scripts/supabase/live-preflight.sql`
-- Create: `scripts/supabase/verify-preflight-report.mjs`
-- Create: `scripts/supabase/compare-live-repository.mjs`
-- Test: `scripts/supabase/preflight-tools.test.mjs`
+- Create: `scripts/local-study/lightweight-live-snapshot.sql`
+- Create: `scripts/local-study/validate-lightweight-snapshot.mjs`
+- Create: `scripts/local-study/lightweight-live-snapshot.test.mjs`
 - Modify: `.gitignore`
 
 **Interfaces:**
-- Consumes: a live PostgreSQL read channel provided by authenticated Supabase MCP `execute_sql` or a direct `psql` connection supplied by the operator.
-- Produces: `artifacts/supabase-preflight/live-catalog.ndjson`, `live-edge-functions.json`, `repository-comparison.json`, and a validation exit code.
+- Consumes: an authenticated read-only SQL channel when available.
+- Produces: `artifacts/local-study-snapshot/current-study-semantics.ndjson` with no row-level participant/response data.
 
-- [ ] **Step 1: Protect raw audit output from Git**
+- [ ] **Step 1: Protect local research artifacts**
 
-Add these exact ignore entries:
+Add exact ignore entries for:
 
 ```gitignore
+artifacts/local-study-snapshot/
 artifacts/supabase-preflight/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.study-package.json
+*.participant-roster.csv
 *.supabase-preflight.dump
 ```
 
-- [ ] **Step 2: Write the catalog audit as one read-only transaction**
+- [ ] **Step 2: Write a read-only SQL snapshot**
 
-Start `live-preflight.sql` with:
-
-```sql
-begin transaction read only;
-set local statement_timeout = '60s';
-set local lock_timeout = '5s';
-set local idle_in_transaction_session_timeout = '60s';
-```
-
-Emit labeled JSON rows for all of the following, using `pg_catalog` and `information_schema`: server/database identity without secrets; schemas; tables; columns and defaults; identity/generated columns; primary, unique, foreign-key, check, and exclusion constraints; indexes and predicates; sequences; triggers; extensions; function names, identity arguments, return types, language, volatility, `prosecdef`, owner, ACL, and configuration; table RLS/forced-RLS state; `pg_policies`; table/schema/function grants; `storage.buckets`; and policies/grants on `storage.objects` and `storage.buckets`. End with `rollback;`.
-
-Use these catalog expressions for function identity and definitions:
-
-```sql
-pg_catalog.pg_get_function_identity_arguments(p.oid),
-pg_catalog.pg_get_function_result(p.oid),
-pg_catalog.pg_get_functiondef(p.oid),
-pg_catalog.pg_get_userbyid(p.proowner)
-```
-
-Do not emit secrets, JWTs, signed URLs, access-code digests, participant IDs, response values, or raw clinical ground truth.
-
-If an integrity count is non-zero and exact natural keys are required for investigator adjudication, run a second read-only query into an encrypted, mode-`0600` file under `artifacts/supabase-preflight/`. Keep that file outside Git, include no response values or ground truth, and reference only salted SHA-256 fingerprints in the sanitized audit.
-
-- [ ] **Step 3: Add exact live-state queries**
-
-The SQL must report existence and sanitized content for:
+Use `BEGIN TRANSACTION READ ONLY`, statement/lock timeouts, schema-qualified `SELECT` statements, and `ROLLBACK`. Inspect only:
 
 ```text
-public.assessment_runtime_config
-public.assessment_session_access
-public.assessment_enrollments
-public.assessment_attempts
-public.videos
-public.assessment_queue
-public.responses
-public.lesion_detection_events
-supabase_migrations.schema_migrations
+public.videos columns/defaults and required metadata fields
+public.assessment_queue columns/defaults
+public.responses columns/defaults/check constraints
+public.lesion_detection_events columns/defaults/check constraints
+public.assessment_runtime_config current DEV/FORMAL value
+currently relevant start/resume, submit, next-order, and video-authorization RPC names/signatures/results
 ```
 
-For `assessment_runtime_config`, return `id` and `study_mode`. For access/enrollment tables, return only existence, columns, constraints, row counts, and grouped status/mode counts. For study data, return exact row counts only.
+For `videos`, capture the presence/type/nullable status of `video_id`, `bucket`, `file_path`, `has_lesion`, `lesion_onset_sec`, `is_test`, and `session_pool`. Capture grouped pool/test counts, but not raw ground truth in the committed audit. Perform zero writes and do not inspect exhaustive grants, migration history, unrelated schemas, or all deployed Edge Functions in P0A.
 
-- [ ] **Step 4: Add integrity queries that return counts plus salted row fingerprints**
+- [ ] **Step 3: Validate snapshot completeness**
 
-Audit duplicate queue order, duplicate queue video, duplicate response trial/order, duplicate event click index, queue gaps, queue rows missing videos, responses missing queue rows, events missing responses, events missing queue rows, participant/session/video/order mismatches, responses beyond the first unanswered order, completed sessions with missing responses, and child rows with null or unknown attempt IDs. Fingerprint offending natural keys with a run-only salt and SHA-256; do not write raw identifiers to committed reports.
-
-- [ ] **Step 5: Verify report completeness in Node**
-
-`verify-preflight-report.mjs` must fail non-zero unless every required section occurs exactly once, the SQL transaction reports read-only mode, `rollback` completes, all commands are `SELECT`/catalog inspection, and the output contains no obvious key/access-code/signed-URL patterns.
-
-Run:
+The validator must classify each required field/signature as `present`, `missing`, or `unknown`, reject secrets/signed URLs/participant rows, and print `database_writes_performed: 0`.
 
 ```bash
-node scripts/supabase/verify-preflight-report.mjs artifacts/supabase-preflight/live-catalog.ndjson
+node --test scripts/local-study/lightweight-live-snapshot.test.mjs
+node scripts/local-study/validate-lightweight-snapshot.mjs artifacts/local-study-snapshot/current-study-semantics.ndjson
 ```
 
-Expected before collecting live output: FAIL with `PRECHECK_REPORT_MISSING`.
+- [ ] **Step 4: Collect when a read-only channel is available**
 
-- [ ] **Step 6: Add repository/live comparison without claiming application state**
+Discover current Supabase MCP/CLI/`psql` capabilities through official help/docs rather than guessing. If no safe read channel exists, record `LIGHTWEIGHT_LIVE_SNAPSHOT_INCOMPLETE`; continue Phases 1-3 using synthetic fixtures. Do not create a production FORMAL package until its required video metadata is obtained and verified.
 
-`compare-live-repository.mjs` must hash normalized live function definitions and compare them with definitions extracted from `supabase/*.sql`; compare `supabase_migrations.schema_migrations` versions with actual repository migration files; and classify each item as `matched`, `live_only`, `repository_only`, `diverged`, or `unknown`. A filename match alone must never yield `matched`.
-
-- [ ] **Step 7: Run local script tests**
-
-```bash
-node --test scripts/supabase/*.test.mjs
-npm run typecheck
-```
-
-Expected: parser fixtures pass; no live connection is required.
-
-- [ ] **Step 8: Commit only Phase 0 tooling**
-
-```bash
-git add .gitignore scripts/supabase/live-preflight.sql scripts/supabase/verify-preflight-report.mjs scripts/supabase/compare-live-repository.mjs scripts/supabase/preflight-tools.test.mjs
-git commit -m "chore: add read-only Supabase preflight tooling"
-```
-
-### Task 2: Collect the live database and platform inventory
+### Task 2: Record the P0A semantic boundary
 
 **Files:**
-- Create outside Git: `artifacts/supabase-preflight/live-catalog.ndjson`
-- Create outside Git: `artifacts/supabase-preflight/live-edge-functions.json`
-- Create outside Git: `artifacts/supabase-preflight/repository-comparison.json`
+- Create: `docs/superpowers/audits/2026-08-29-lightweight-live-study-semantics.md`
 
 **Interfaces:**
-- Consumes: Task 1 tooling and one authenticated read-only live access path.
-- Produces: complete P0 evidence or the terminal verdict `BLOCKED_BY_ENVIRONMENT`.
-
-- [ ] **Step 1: Discover tools rather than guessing commands**
-
-```bash
-supabase --version
-supabase --help
-supabase functions --help
-psql --version
-```
-
-The current workstation snapshot has none of these binaries. At execution time, use authenticated Supabase MCP if it exposes read-only SQL and function listing; otherwise install the official CLI and PostgreSQL client after approval. If neither MCP nor a direct database URL can inspect `pg_catalog`, stop with `BLOCKED_BY_ENVIRONMENT: NO_READ_ONLY_CATALOG_CHANNEL`.
-
-- [ ] **Step 2: Review current Supabase changes before using the platform**
-
-Fetch `https://supabase.com/changelog.md`, scan relevant Auth, Edge Functions, Storage, CLI, and database breaking changes, then open the current official docs for the exact commands used. Record URLs and access date in the raw report.
-
-- [ ] **Step 3: Execute the database audit in read-only mode**
-
-For `psql`, require the operator-provided connection variable and stop on any error:
-
-```bash
-psql "$SUPABASE_DB_URL" --no-psqlrc --set ON_ERROR_STOP=1 --file scripts/supabase/live-preflight.sql > artifacts/supabase-preflight/live-catalog.ndjson
-```
-
-For MCP, submit the same SQL without removing `BEGIN TRANSACTION READ ONLY` or `ROLLBACK`, then save the returned text locally. Do not use a browser publishable key for catalog inspection.
-
-- [ ] **Step 4: Inventory deployed Edge Functions from the live project**
-
-Authenticate the official CLI to the exact project ref, list deployed functions, and record only name, status, version/import-map metadata, created/updated time, and JWT-verification setting. After checking current `supabase functions --help`, use the supported read-only download/inspection command to save each deployed bundle under the ignored raw artifact directory, hash it, and compare its request shape/RPC calls with repository source. Do not download or log deployed secrets. Required names to classify include the observed legacy `issue-assessment-video-url` plus any live-only functions. If the deployed bundle/contract cannot be inspected sufficiently to prove compatibility, stop with `BLOCKED_BY_ENVIRONMENT: EDGE_FUNCTION_CONTRACT_UNKNOWN`.
-
-- [ ] **Step 5: Verify the three reports**
-
-```bash
-node scripts/supabase/verify-preflight-report.mjs artifacts/supabase-preflight/live-catalog.ndjson
-node scripts/supabase/compare-live-repository.mjs \
-  artifacts/supabase-preflight/live-catalog.ndjson \
-  artifacts/supabase-preflight/repository-comparison.json
-```
-
-Expected: both commands exit 0. Any missing owner, ACL, RLS/policy, Storage policy, Edge Function, migration-history, or integrity section is a blocking failure.
-
-### Task 3: Publish the sanitized P0 verdict and stop for review
-
-**Files:**
-- Create: `docs/superpowers/audits/2026-08-29-live-supabase-preflight.md`
-
-**Interfaces:**
-- Consumes: Task 2 validated raw reports.
-- Produces: `SAFE_TO_DESIGN_ATTEMPT_MIGRATION` or `BLOCKED_BY_ENVIRONMENT`.
-
-- [ ] **Step 1: Write the sanitized audit**
-
-Include exact live table/column, constraint/index, RPC signature, owner/grant, RLS/policy, Storage-policy, Edge Function, runtime-config, access/enrollment-table existence, row-count, integrity-count, and migration-history findings. Include SHA-256 hashes of raw reports and classify the live state as `access_code`, `no_access_code_experimental`, `mixed`, or `unclassifiable`.
-
-- [ ] **Step 2: Apply the migration-mapping decision rule**
-
-The verdict is `SAFE_TO_DESIGN_ATTEMPT_MIGRATION` only when every historical participant/session group has one lossless mode classification, no duplicate/orphan prevents backfill, every current release RPC and Edge Function contract is known, and repository/live divergence is explained. Otherwise use:
+- Produces: the LOCAL field/RPC contract evidence and one of:
 
 ```text
-BLOCKED_BY_ENVIRONMENT
-blocking_evidence: catalog.function_owner_missing, integrity.orphan_response_count_nonzero
-required_external_change: provide function-owner catalog access and investigator adjudication for the fingerprinted orphan rows
-database_writes_performed: 0
+LOCAL_SEMANTICS_SNAPSHOT_READY
+LIGHTWEIGHT_LIVE_SNAPSHOT_INCOMPLETE
 ```
 
-- [ ] **Step 3: Self-review and commit the audit only**
+- [ ] **Step 1: Document exact observed semantics**
 
-```bash
-git add docs/superpowers/audits/2026-08-29-live-supabase-preflight.md
-git diff --cached --check
-git commit -m "docs: record live Supabase preflight"
-```
+Record required columns/types, current DEV/FORMAL authority, relevant RPC signatures, pool counts, raw snapshot SHA-256, missing evidence, and `database_writes_performed: 0`. Do not claim which repository migration produced the live state.
 
-- [ ] **Step 4: P0 review checkpoint**
+- [ ] **Step 2: Apply the non-blocking rule**
 
-Stop. If blocked, no migration file may be created. If safe, obtain explicit approval to begin Phase 1 migration design and restored-copy testing. This approval does not authorize a live migration.
+Uncertain migration history or incomplete broad environment characterization is not a LOCAL blocker. It is carried forward as a mandatory Phase 4 blocker for live migration, sync deployment, and Auth deployment.
+
+- [ ] **Step 3: Commit only P0A tooling/audit**
+
+Use exact paths and verify the staged diff. Stop for the P0A review checkpoint; approval permits Phase 1 LOCAL work only.
 
 ---
 
-## Phase 1: Attempt Model and Backward-Compatible Migration
+## Phase 1: Shared Runtime Contracts and LOCAL Video Primitives
 
-### Task 4: Build a restored-copy migration contract harness
-
-**Files:**
-- Create: `supabase/fixtures/legacy-live-shape.sql`
-- Create: `supabase/assessment_attempts.contract.test.mjs`
-- Modify: `package.json`
-
-**Interfaces:**
-- Consumes: sanitized P0 schema shape and raw report hashes.
-- Produces: repeatable legacy fixtures and executable migration assertions.
-
-- [ ] **Step 1: Create a sanitized fixture from live structure**
-
-Model every live column/default/constraint/function signature needed by `d4957ed`, plus representative rows for: empty session, partial session, complete session, DEV, FORMAL, negative latency, repeated lesion marks, exact duplicate retry, and separate Sessions 1-3. Use synthetic IDs only.
-
-- [ ] **Step 2: Write failing attempt migration tests**
-
-Assert stable UUIDv5 backfill using namespace `c9811a35-5bb1-422b-85cf-7967240841dc` and name bytes `participant_id + chr(31) + session_number`; exact preservation of bigint IDs, timestamps, answers, timing, and events; mode derivation; attempt status; no auto-validity; rerun idempotency; and fail-fast behavior for ambiguous/orphan fixtures.
-
-- [ ] **Step 3: Write legacy API contract snapshots**
-
-Capture exact live names, identity arguments, result columns, grants, error categories, and Edge Function request/response body used by `d4957ed`. Tests must fail if Stage B renames a function, changes an argument list, changes a result shape, or grants broader access.
-
-- [ ] **Step 4: Run the harness against an isolated PostgreSQL database**
-
-Use a restored live schema/data copy in a non-production project or local PostgreSQL. Never point fixture tests at live Supabase.
-
-```bash
-node --test supabase/assessment_attempts.contract.test.mjs
-```
-
-Expected before migration files exist: FAIL with missing `assessment_attempts` and missing `attempt_id`.
-
-### Task 5: Implement and rehearse Stage A additive migration
-
-**Files:**
-- Create through CLI: migration named `assessment_attempts_stage_a`
-- Modify: `supabase/assessment_attempts.contract.test.mjs`
-
-**Interfaces:**
-- Produces: additive attempt tables/columns, deterministic backfill, validation functions, and no legacy contract change.
-
-- [ ] **Step 1: Generate the migration through the official CLI**
-
-```bash
-supabase migration new assessment_attempts_stage_a
-```
-
-Record the generated path in the phase ledger; do not invent a timestamped filename.
-
-- [ ] **Step 2: Add attempt and validity-audit tables additively**
-
-Create `public.assessment_attempts` and `public.assessment_attempt_validity_decisions` with the exact spec fields, immutable-field trigger, status-transition checks, same-identity replacement FK, composite unique identity, completed-only validity check, and partial unique valid-attempt index. Enable RLS and revoke default `PUBLIC` privileges before adding narrowly scoped grants.
-
-- [ ] **Step 3: Add nullable child attempt IDs and deterministic backfill**
-
-Add nullable `attempt_id` to queue, responses, events, and the actual live legacy access binding. Preflight `uuid-ossp`; derive one legacy ONLINE attempt per participant/session with the fixed namespace, and abort on ambiguous study mode, duplicates, or orphans. Keep all old unique indexes.
-
-- [ ] **Step 4: Add defensive validation without activating multiple attempts**
-
-Create attempt-aware indexes that coexist with old uniqueness. Add a temporary trigger that fills a null child `attempt_id` only from one unambiguous bound legacy attempt and rejects every ambiguous write. Do not set child columns `NOT NULL`.
-
-- [ ] **Step 5: Rehearse twice against the restored copy**
-
-Apply Stage A, verify every count/hash, restore the pre-migration copy, and repeat. Then test migration re-entry only where the SQL is intentionally idempotent; migration-history application itself remains once-only.
-
-- [ ] **Step 6: Run focused and standard tests**
-
-```bash
-node --test supabase/assessment_attempts.contract.test.mjs
-npm run typecheck
-npm test
-npm run build
-```
-
-Expected: all preserved-data and legacy-signature assertions pass.
-
-### Task 6: Implement and rehearse Stage B legacy API bridge
-
-**Files:**
-- Create through CLI: migration named `legacy_attempt_api_bridge_stage_b`
-- Modify: `supabase/assessment_attempts.contract.test.mjs`
-- Test unchanged source: Git worktree at commit `d4957edd455e7f99bc71cbde09c23254edabcfac`
-
-**Interfaces:**
-- Produces: unchanged legacy RPC/Edge Function contracts whose internals are scoped to the bound legacy attempt.
-
-- [ ] **Step 1: Generate the bridge migration through the CLI**
-
-```bash
-supabase migration new legacy_attempt_api_bridge_stage_b
-```
-
-- [ ] **Step 2: Replace legacy RPC bodies only**
-
-Keep every live function name, identity argument list, return shape, credential check, error category, and grant exactly as P0 recorded. Derive the bound `attempt_id` from the real legacy access table and add it to all queue/progress/response/event predicates. Every `SECURITY DEFINER` function uses a trusted owner, `set search_path = ''`, schema-qualified objects, explicit `REVOKE ... FROM PUBLIC`, and explicit role grants.
-
-- [ ] **Step 3: Keep the old Edge Function request/response contract**
-
-Do not deploy new Edge Function source in this task. Prove that its current RPC call resolves exactly one attempt-scoped current video and returns the same bucket/file path shape.
-
-- [ ] **Step 4: Run unchanged-release browser tests against the restored database**
-
-Build and run a separate worktree at `d4957ed` with a test environment pointing only to the restored/non-production Supabase project. Verify start, persisted random queue, refresh resume, private signed video load, positive response with events, negative response, duplicate retry, next-video authorization, and completion.
-
-- [ ] **Step 5: Run security and regression checks**
-
-Run current Supabase database advisors or equivalent official checks, inspect every function owner/grant/search path, prove anonymous direct table reads still fail, and prove direct private Storage reads fail.
-
-- [ ] **Step 6: Commit Stage A/B rehearsal work with exact paths**
-
-Stage only generated migration files, fixture, contract tests, and intentional package-script changes. Do not stage `supabase/remove_assessment_access_code.sql`.
-
-### Task 7: P1A review and separately approved live Stage A/B window
-
-**Files:**
-- Create outside Git: encrypted schema/data backup and migration run log.
-- Modify: sanitized audit with post-migration hashes only after execution.
-
-**Interfaces:**
-- Consumes: accepted Stage A/B rehearsal.
-- Produces: live additive attempt model while retaining the unchanged release contract.
-
-- [ ] **Step 1: Stop for explicit live-migration approval**
-
-Present P0 evidence, restored-copy results, exact SQL diff, lock/runtime estimates, backup/restore procedure, rollback limits, and unchanged-release smoke protocol. Do not continue on general implementation approval; require approval naming Stage A/B live migration.
-
-- [ ] **Step 2: Re-run P0 immediately before the window**
-
-Abort if schema hashes, row counts, functions, Edge Functions, policies, or integrity findings changed.
-
-- [ ] **Step 3: Back up and apply only Stage A/B**
-
-Use the official migration mechanism selected after CLI discovery. Do not apply Stage C or any Auth/sync migration.
-
-- [ ] **Step 4: Verify live state and unchanged ECS behavior**
-
-Compare pre/post counts and hashes; ensure every legacy child has one attempt; check constraints/grants/RLS/advisors; then perform real HTTP, start/resume, signed-video playback, response/event insert, retry, next-video, and completion smoke tests against the unchanged ECS release using dedicated test IDs.
-
-- [ ] **Step 5: P1B checkpoint**
-
-Stop for review. If any verification fails, execute the rehearsed recovery path and do not proceed to Stage C.
-
-### Task 8: Rehearse and separately approve Stage C attempt constraints
-
-**Files:**
-- Create through CLI: migration named `activate_attempt_constraints_stage_c`
-- Modify: `supabase/assessment_attempts.contract.test.mjs`
-
-**Interfaces:**
-- Produces: attempt-scoped final child constraints while preserving the legacy bridge.
-
-- [ ] **Step 1: Generate and test Stage C only on a fresh restored post-B copy**
-
-Drop old participant/session uniqueness only after proving all child `attempt_id` values are non-null. Add composite queue identity, child identity FKs, unique `(attempt_id, video_order)`, queue unique `(attempt_id, video_id)`, event unique `(attempt_id, video_order, click_index)`, and child `attempt_id NOT NULL`.
-
-- [ ] **Step 2: Prove multiple attempts and within-attempt protection**
-
-Two attempts for one participant/session must accept independent queues; duplicates within either attempt must fail. Mismatched participant/session/video/order child rows must fail.
-
-- [ ] **Step 3: Re-run unchanged-release and full standard gates**
-
-```bash
-node --test supabase/assessment_attempts.contract.test.mjs
-npm run typecheck
-npm test
-npm run build
-```
-
-- [ ] **Step 4: Stop for a separate Stage C live approval**
-
-Repeat preflight, backup, controlled apply, post-check, and unchanged-release browser verification only after approval naming Stage C. Keep all legacy access-code APIs and the legacy Edge Function.
-
----
-
-## Phase 2: Connected LOCAL Vertical Slice with Local Videos
-
-### Task 9: Introduce source-neutral contracts and fail-closed server mode
+### Task 3: Add fail-closed deployment mode and source-neutral contracts
 
 **Files:**
 - Create: `lib/runtime/deploymentMode.ts`
 - Create: `lib/runtime/deploymentMode.test.ts`
 - Create: `lib/assessment/contracts.ts`
-- Create: `lib/video/contracts.ts`
+- Create: `lib/assessment/contracts.test.ts`
 - Create: `lib/assessment/assessmentRepositoryFactory.ts`
-- Create: `lib/video/videoAccessGatewayFactory.ts`
+- Create: `lib/video/contracts.ts`
 - Modify: `app/page.tsx`
 
 **Interfaces:**
@@ -505,99 +231,63 @@ Repeat preflight, backup, controlled apply, post-check, and unchanged-release br
 
 ```ts
 export type DeploymentMode = "local" | "online";
-export type RuntimeChannel = DeploymentMode;
-export type AttemptStatus = "in_progress" | "completed" | "abandoned" | "invalid";
-export type StudyMode = "dev" | "formal";
 export type SessionNumber = 1 | 2 | 3;
+export type ParticipantStartInput = {
+  participantId: string;
+  sessionNumber: SessionNumber;
+  attemptId?: string;
+};
 export type AttemptQueueItem = { videoId: string; videoOrder: number };
-export type AttemptSummary = {
+export type AttemptStatus = "in_progress" | "completed" | "abandoned" | "invalid";
+export type AttemptSession = {
   attemptId: string;
   participantId: string;
   sessionNumber: SessionNumber;
-  runtimeChannel: RuntimeChannel;
-  studyMode: StudyMode;
   status: AttemptStatus;
-  startedAt: string;
-};
-export type StartInput = {
-  participantId: string;
-  sessionNumber: SessionNumber;
-  studyMode: StudyMode;
-  attemptId?: string;
-};
-export type AssessmentAttemptSession = AttemptSummary & {
   queue: readonly AttemptQueueItem[];
   nextVideoOrder: number;
   isComplete: boolean;
 };
 export type StartResult =
-  | { kind: "session"; session: AssessmentAttemptSession }
-  | { kind: "attempt_choice_required"; attempts: readonly AttemptSummary[] };
-export type AttemptVideoSubmission = {
-  attemptId: string;
-  videoId: string;
-  videoOrder: number;
-  finalAnswer: boolean;
-  responseTimeMs: number;
-  noResponseLatencyMs: number | null;
-  videoCompleted: true;
-  clicks: readonly {
-    clickIndex: number;
-    videoTimeAtClick: number;
-    responseTimeMs: number;
-  }[];
-};
-export type SubmitResult = {
-  outcome: "accepted" | "idempotent";
-  nextVideoOrder: number;
-  isComplete: boolean;
-};
-export type AttemptVideoInput = { attemptId: string; videoOrder: number };
-export type VideoPlaybackSource = AttemptQueueItem & {
-  attemptId: string;
-  url: string;
-  expiresAt: string | null;
-};
-
+  | { kind: "session"; session: AttemptSession }
+  | { kind: "attempt_choice_required"; attempts: readonly AttemptSession[] };
 export interface AssessmentRepository {
-  createOrResumeAttempt(input: StartInput): Promise<StartResult>;
+  createOrResumeAttempt(input: ParticipantStartInput): Promise<StartResult>;
   submitResponse(submission: AttemptVideoSubmission): Promise<SubmitResult>;
   markAttemptAbandoned(attemptId: string): Promise<void>;
 }
-
 export interface CurrentVideoAuthorizationRepository {
   authorizeCurrentVideo(attemptId: string, videoOrder: number): Promise<{
     videoId: string;
     relativeFilePath: string;
   }>;
 }
-
 export interface VideoAccessGateway {
-  getCurrentVideo(input: AttemptVideoInput): Promise<VideoPlaybackSource>;
+  getCurrentVideo(input: { attemptId: string; videoOrder: number }): Promise<{
+    attemptId: string;
+    videoId: string;
+    videoOrder: number;
+    url: string;
+    expiresAt: string | null;
+  }>;
 }
 ```
 
-- [ ] **Step 1: Write mode and factory tests first**
+`AttemptVideoSubmission` retains current answer, response-time, no-response-latency, video-completed, and click fields plus `attemptId`; participant ID, session, correctness, lesion onset, and detection latency are resolved/validated by the trusted repository context.
 
-Assert exact `local`/`online` parsing; missing, empty, mixed-case, hostname inference, browser query/header/cookie, and unknown values fail. Assert local factories never instantiate remote adapters and online factories never import/open filesystem or SQLite adapters.
+- [ ] **Step 1: Test server-only mode**
 
-- [ ] **Step 2: Implement server-only parsing**
+Only exact `local`/`online` values pass. Missing/invalid values, hostname/port/branch inference, browser query/header/cookie flags, and mixed case fail. Every server route rechecks the mode.
 
-Use `import "server-only"`; read only `process.env.ASSESSMENT_DEPLOYMENT_MODE`; return a typed mode or throw `ASSESSMENT_DEPLOYMENT_MODE_INVALID`. `app/page.tsx` passes display-safe mode to the UI, but every server route independently rechecks mode.
+- [ ] **Step 2: Test participant input boundaries**
 
-- [ ] **Step 3: Add attempt identity to shared types**
+Assert `ParticipantStartInput` and browser payload parsing accept only participant ID, Session 1/2/3, and optional attempt ID. Explicitly reject `studyMode`, `study_mode`, `is_test`, `session_pool`, and ground-truth fields.
 
-`StartInput` contains participant ID, session number, study mode, optional explicit attempt ID, and no access code in LOCAL. `AttemptVideoSubmission` contains immutable `attemptId`, `videoId`, `videoOrder`, final response, timing, and marks. Keep response/event field meanings unchanged.
+- [ ] **Step 3: Implement the contracts without live Supabase changes**
 
-- [ ] **Step 4: Run focused tests and commit**
+Use `import "server-only"` for mode/factory modules. Factories may use test doubles in Phase 1; no live attempt-aware Supabase repository is required.
 
-```bash
-node --test lib/runtime/deploymentMode.test.ts
-npm run typecheck
-npm test
-```
-
-### Task 10: Implement strict local path and HTTP Range primitives
+### Task 4: Implement path containment and Range parsing
 
 **Files:**
 - Create: `lib/video/rangeRequest.ts`
@@ -614,74 +304,51 @@ export function parseSingleRange(header: string | null, size: number): ByteRange
 export async function resolveAuthorizedMp4(root: string, relativePath: string): Promise<string>;
 ```
 
-- [ ] **Step 1: Test all required ranges**
+- [ ] **Step 1: Test Range behavior**
 
-Cover no range, `bytes=0-99`, `bytes=100-`, `bytes=-100`, final byte, malformed unit, empty values, reversed range, multiple ranges, zero-size file, start beyond size, and suffix zero. Invalid/unsatisfiable input returns a typed 416 error carrying exact size.
+Cover no range, start-end, open-ended, suffix, last byte, malformed unit, empty/reversed/multiple ranges, zero-size file, out-of-bounds start, and zero suffix. Invalid or unsatisfiable ranges produce a typed 416 error with exact file size.
 
 - [ ] **Step 2: Test path containment**
 
-Cover empty, absolute, NUL, `.`, `..`, URL-encoded traversal after route decoding, non-MP4, directory, missing file, symlink inside root, and symlink escaping root. Resolve `realRoot` and `realTarget`; reject when `path.relative(realRoot, realTarget)` is absolute or begins with `..`.
+Reject empty, absolute, NUL, dot/traversal, encoded traversal after route decoding, non-MP4, directory, missing file, and symlink escaping the real root. Allow a regular readable MP4 and an internal symlink only when its real target remains under the real root.
 
-- [ ] **Step 3: Implement and verify**
+- [ ] **Step 3: Implement and run focused tests**
 
 ```bash
 node --test lib/video/rangeRequest.test.ts lib/video/localPath.test.ts
 npm run typecheck
 ```
 
-### Task 11: Add the attempt-authorized LOCAL stream route
+### Task 5: Add a LOCAL-only authorized streaming route
 
 **Files:**
 - Create: `lib/video/localVideoAccessGateway.ts`
 - Create: `app/api/local/attempts/[attemptId]/videos/[videoOrder]/route.ts`
-- Test: `app/api/local/attempts/[attemptId]/videos/[videoOrder]/route.test.ts`
+- Create: `app/api/local/attempts/[attemptId]/videos/[videoOrder]/route.test.ts`
 
 **Interfaces:**
-- Consumes: `CurrentVideoAuthorizationRepository`:
+- Consumes: `CurrentVideoAuthorizationRepository`; Phase 1 tests use a local in-memory fixture, and Phase 2 replaces it with SQLite.
+- Produces: current-order URL `/api/local/attempts/{attemptId}/videos/{videoOrder}`.
 
-```ts
-authorizeCurrentVideo(attemptId: string, videoOrder: number): Promise<{
-  videoId: string;
-  relativeFilePath: string;
-}>;
-```
+- [ ] **Step 1: Test authorization before file access**
 
-- [ ] **Step 1: Write route tests with a temporary video root**
+Require server mode `local`, an in-progress local attempt, and exact first-unanswered order. Knowing a filename/video ID is insufficient. Reject previous/future/completed/unknown attempts before opening a file.
 
-Assert LOCAL-only mode, in-progress LOCAL attempt, first-unanswered order, immutable snapshot path, `GET` 200, exact 206 bytes for three range forms, 416 headers, `HEAD` body omission, and stream errors that mention video ID but never absolute path.
+- [ ] **Step 2: Implement `GET` and `HEAD` streaming**
 
-- [ ] **Step 2: Implement the Node runtime handler**
+Use Node runtime and disk streaming. No Range returns 200; one valid range returns exact 206 bytes; invalid/multiple/unsatisfiable ranges return 416 with `Content-Range: bytes */size`; `HEAD` returns headers without a body. Include `Accept-Ranges`, `Content-Type: video/mp4`, exact `Content-Length`, and partial `Content-Range`.
 
-Export `runtime = "nodejs"` and `dynamic = "force-dynamic"`. The route accepts only attempt ID and numeric order, asks `CurrentVideoAuthorizationRepository` for the current authorized relative path, resolves under `LOCAL_VIDEO_ROOT`, and streams with `createReadStream({ start, end })` converted to a Web stream. The transitional Phase 2 authorizer derives the path from the attempt-aware Supabase queue plus `videos`; the final Phase 3 authorizer reads the attempt's immutable SQLite snapshot. The route code and response contract stay unchanged. Set `Accept-Ranges`, `Content-Type`, `Content-Length`, and partial `Content-Range` exactly.
+- [ ] **Step 3: Prove source isolation**
 
-- [ ] **Step 3: Prove no Storage fallback**
+Tests make all Supabase and Storage adapters throw if imported/called. Missing files return `LOCAL_VIDEO_MISSING` containing video ID but no absolute path and no remote fallback.
 
-Mock all Supabase/Storage adapters to throw if called and verify the LOCAL route still passes. Missing local file must return `LOCAL_VIDEO_MISSING` without invoking remote code.
-
-### Task 12: Wire the transitional connected LOCAL slice
+### Task 6: P1 gate
 
 **Files:**
-- Create: `app/api/assessment/start/route.ts`
-- Create: `app/api/assessment/response/route.ts`
-- Create: `app/api/assessment/video/route.ts`
-- Modify: `components/AssessmentClient.tsx`
-- Modify: `components/AssessmentFlow.test.mjs`
-- Modify: `.env.production.example`
 - Create: `.env.local.example`
+- Modify: `next.config.mjs` only if required for route/runtime isolation.
 
-**Interfaces:**
-- Consumes: attempt-aware Supabase development repository plus LOCAL stream gateway.
-- Produces: source-neutral client flow with local playback and temporary connected Supabase persistence.
-
-- [ ] **Step 1: Test browser API boundaries**
-
-LOCAL intake has participant ID/session only. ONLINE behavior remains unchanged in this phase. Assessment components call only `/api/assessment/*`; they do not inspect filesystem, Storage, or Supabase source mode. Server routes validate all payloads and mode.
-
-- [ ] **Step 2: Adapt the client without changing study semantics**
-
-Keep repeated marks, mark deletion, first-pass seek restriction, replay after first real ended event, mutually exclusive yes/no, response timing, negative detection latency, atomic submission, retry, resume, and completion. Add `attemptId` to every request and key current video by attempt/order.
-
-- [ ] **Step 3: Add LOCAL configuration template**
+- [ ] **Step 1: Add non-secret LOCAL configuration names**
 
 ```env
 ASSESSMENT_DEPLOYMENT_MODE=local
@@ -690,57 +357,33 @@ LOCAL_STUDY_PACKAGE_PATH=/Users/Shared/deskilling/study-package.json
 LOCAL_VIDEO_ROOT=/Users/Shared/deskilling/videos
 ```
 
-Add this exact mode line before the existing public Supabase names in `.env.production.example`:
+- [ ] **Step 2: Run phase verification**
 
-```env
-ASSESSMENT_DEPLOYMENT_MODE=online
-```
-
-The connected slice may additionally use Supabase credentials only in the operator's ignored `.env.local`. It must be labeled transitional and must not be accepted as the final offline mode.
-
-- [ ] **Step 4: Real-browser verification**
-
-Run on `127.0.0.1`, use participant `LOCALDEV-CONNECTED-001`, verify Network panel 206 requests, forward-seek restriction before first end, backward seek, post-end replay, marks, deletion, yes/no submission, refresh resume, and no filesystem path leakage.
-
-- [ ] **Step 5: P2 gate**
-
-Run focused tests, `npm run typecheck`, `npm test`, and `npm run build`; perform code review; stop for approval before SQLite work.
+Run focused tests, standard gates, and a localhost Range smoke test. Confirm no migration file, Supabase write, live DB dependency, `release` change, or ECS action occurred. Stop for Phase 2 approval.
 
 ---
 
-## Phase 3: Fully Offline LOCAL SQLite Collection
+## Phase 2: LOCAL SQLite and Sealed Study Package
 
-### Task 13: Pin SQLite and canonicalization dependencies
+### Task 7: Pin and configure the SQLite runtime
 
 **Files:**
 - Modify: `package.json`
 - Modify: `package-lock.json`
 - Modify: `next.config.mjs`
 
-**Interfaces:**
-- Produces: stable native SQLite runtime for Node 22 and RFC 8785 serialization support.
-
-- [ ] **Step 1: Install exact versions**
+- [ ] **Step 1: Install exact dependencies**
 
 ```bash
 npm install --save-exact better-sqlite3@13.0.3 canonicalize@4.0.0
 npm install --save-dev --save-exact @types/better-sqlite3@9.6.0
 ```
 
-- [ ] **Step 2: Keep the native module server-only**
+- [ ] **Step 2: Keep native SQLite server-only**
 
-Add `serverExternalPackages: ["better-sqlite3"]` to `next.config.mjs`. Add a build test proving no browser bundle references `better-sqlite3`, local paths, or `SUPABASE_SERVICE_ROLE_KEY`.
+Configure `serverExternalPackages: ["better-sqlite3"]`. Build tests must prove browser chunks contain no SQLite module, local absolute paths, package roster, lesion ground truth, or service-role credential names.
 
-- [ ] **Step 3: Verify install and build**
-
-```bash
-npm ci
-npm run typecheck
-npm test
-npm run build
-```
-
-### Task 14: Implement guarded SQLite open and versioned schema
+### Task 8: Create the durable LOCAL SQLite schema
 
 **Files:**
 - Create: `lib/local/sqlite/database.ts`
@@ -756,25 +399,25 @@ export function migrateLocalDatabase(db: Database.Database): void;
 export function assertLocalIntegrity(db: Database.Database): void;
 ```
 
-- [ ] **Step 1: Test safe database opening**
+- [ ] **Step 1: Test guarded open**
 
-Missing parent, directory path, unreadable existing file, corrupt SQLite header, incompatible future schema, migration failure, and integrity failure must block collection without replacing or truncating the file.
+Block missing parent, directory path, unreadable/corrupt existing file, future schema version, failed migration, and integrity failure without truncating or replacing the existing file.
 
 - [ ] **Step 2: Configure durability**
 
-On every open, enforce `foreign_keys = ON`, `journal_mode = WAL`, `busy_timeout = 5000`, and `synchronous = FULL`. Verify returned pragma values. Run `quick_check` on normal start and `integrity_check` before formal start/export.
+Enforce foreign keys, WAL, `busy_timeout = 5000`, and `synchronous = FULL`; run `quick_check` on start and `integrity_check` before FORMAL start/export.
 
-- [ ] **Step 3: Create version 1 schema in one transaction**
+- [ ] **Step 3: Create version 1 schema transactionally**
 
-Create all eight local tables from the spec, attempt-scoped uniqueness, composite FKs, immutable metadata snapshot, UTC millisecond timestamps, integer millisecond timing storage, schema migration ledger, package registry, and sync log. A failed migration rolls back and preserves the original file.
+Create `local_assessment_attempts`, `local_assessment_queue`, `local_responses`, `local_lesion_detection_events`, `local_video_metadata_snapshot`, `local_study_packages`, `local_sync_log`, and `local_schema_migrations`. Generate `attempt_id` natively in SQLite before queue creation. Enforce attempt-scoped queue/response/event uniqueness and identity FKs. Store UTC timestamps with millisecond precision and recorded media time without binary-rounding drift.
 
-### Task 15: Export and validate a sealed LOCAL study package
+### Task 9: Define and validate the sealed package and formal roster
 
 **Files:**
 - Create: `lib/local/studyPackage.ts`
 - Create: `lib/local/studyPackage.test.ts`
-- Create: `scripts/local/export-study-package.mjs`
-- Create: `scripts/local/validate-study-package.mjs`
+- Create: `scripts/local-study/build-package.mjs`
+- Create: `scripts/local-study/validate-package.mjs`
 - Modify: `package.json`
 
 **Interfaces:**
@@ -784,50 +427,44 @@ Create all eight local tables from the spec, attempt-scoped uniqueness, composit
 export type LocalStudyPackageV1 = {
   packageVersion: 1;
   minimumSchemaVersion: 1;
+  studyMode: "dev" | "formal";
   generatedAt: string;
-  videos: LocalVideoManifestRow[];
+  allowedParticipantIds: readonly string[];
+  videos: readonly {
+    videoId: string;
+    filePath: string;
+    hasLesion: boolean;
+    lesionOnsetSec: number | null;
+    isTest: boolean;
+    sessionPool: 1 | 2 | 3 | null;
+    fileSizeBytes: number;
+    fileSha256: string;
+  }[];
   checksumSha256: string;
 };
-export type LocalVideoManifestRow = {
-  videoId: string;
-  filePath: string;
-  hasLesion: boolean;
-  lesionOnsetSec: number | null;
-  isTest: boolean;
-  sessionPool: 1 | 2 | 3 | null;
-  fileSizeBytes: number;
-  fileSha256: string;
-};
-export type ValidationInput = {
-  manifestPath: string;
-  videoRoot: string;
-  requestedMode: "dev" | "formal";
-};
-export type ValidatedStudyPackage = {
-  manifest: LocalStudyPackageV1;
-  canonicalJson: string;
-  videosById: ReadonlyMap<string, LocalVideoManifestRow>;
-};
-export async function validateStudyPackage(input: ValidationInput): Promise<ValidatedStudyPackage>;
 ```
 
-- [ ] **Step 1: Test canonical manifest validation**
+- [ ] **Step 1: Make package mode authoritative**
 
-DEV allows the configured test pool. FORMAL requires exactly 40 non-test videos in each pool 1/2/3, 120 unique video IDs and paths, no cross-pool reuse, valid lesion metadata, readable regular MP4s, exact size/hash, compatible versions, and a matching manifest checksum.
+`studyMode` comes only from the server-loaded package. No route accepts a participant-supplied mode. A DEV package selects test videos. A FORMAL package selects only non-test videos from its session pools.
 
-- [ ] **Step 2: Implement connected export as an operator command**
+- [ ] **Step 2: Add the coded participant roster**
 
-The exporter reads current Supabase video metadata through a trusted operator context, resolves files only under `LOCAL_VIDEO_ROOT`, calculates per-file SHA-256/size, sorts by video ID, canonicalizes with RFC 8785, and writes atomically to the operator-selected path. It never embeds Supabase credentials or absolute file paths.
+FORMAL requires a non-empty, normalized, unique `allowedParticipantIds` array. Package creation reads an operator-controlled coded-ID roster outside Git. Reject whitespace variants, duplicates, empty IDs, and password/secret-like columns. The final package contains coded participant IDs only, never passwords, email addresses, Auth UUIDs, access codes, or password hashes.
 
-- [ ] **Step 3: Implement offline validation**
+- [ ] **Step 3: Validate FORMAL videos and metadata**
 
-```bash
-npm run local:validate-package
-```
+Require exactly 40 videos for each pool 1/2/3, 120 unique video IDs and file paths across pools, regular readable MP4 files, exact size/SHA-256, and complete valid lesion metadata. Reject test videos in FORMAL and any cross-pool reuse.
 
-Expected success prints package version, schema version, DEV count, Session 1/2/3 counts, total bytes, checksum, and `FORMAL_READY`; failures print exact video IDs/reasons but not absolute paths.
+- [ ] **Step 4: Seal the manifest**
 
-### Task 16: Implement transactional LOCAL attempt lifecycle
+Sort participant IDs and videos, canonicalize all manifest fields except `checksumSha256` with RFC 8785, calculate SHA-256, then write the final package atomically outside Git. Attempt creation stores package checksum and a complete immutable metadata snapshot.
+
+- [ ] **Step 5: Test package-source flexibility without migration dependency**
+
+Package tooling accepts a validated P0A export or an operator-approved equivalent manifest fixture. It does not query or require `assessment_attempts`, attempt-aware RPCs, live migration history, or ECS. A real FORMAL package cannot be declared ready until video metadata, files, hashes, and roster are verified.
+
+### Task 10: Implement the native LOCAL attempt repository
 
 **Files:**
 - Create: `lib/local/sqlite/localAssessmentRepository.ts`
@@ -835,438 +472,433 @@ Expected success prints package version, schema version, DEV count, Session 1/2/
 - Modify: `lib/assessment/assessmentRepositoryFactory.ts`
 
 **Interfaces:**
-- Implements `AssessmentRepository` and `authorizeCurrentVideo` from Tasks 9/11.
+- Implements `AssessmentRepository` and `CurrentVideoAuthorizationRepository` from Phase 1.
 
-- [ ] **Step 1: Test start and persisted randomization**
+- [ ] **Step 1: Test roster-gated start**
 
-Create UUID once, validate package, snapshot exact metadata, select the mode/session pool, shuffle with versioned Fisher-Yates, persist attempt and all queue rows in one transaction, and return Video 1 only after commit. FORMAL requires exactly 40.
+For FORMAL, reject any participant ID absent from `allowedParticipantIds` before creating an attempt. For an approved ID, create a random UUID, freeze package mode/checksum, snapshot metadata, randomize the correct session pool once, and persist attempt plus complete queue in one transaction.
 
-- [ ] **Step 2: Test resume and ambiguous attempt selection**
+- [ ] **Step 2: Test resume/selection**
 
-Resume by explicit attempt ID. Participant/session lookup may suggest one in-progress attempt; two in-progress attempts must return a choice list and never select by newest timestamp.
+Resume by explicit attempt ID. If participant/session has one in-progress attempt, it may be suggested; if multiple exist, return `attempt_choice_required` and never choose by timestamp. Completed/abandoned/invalid attempts are read-only.
 
-- [ ] **Step 3: Test atomic response/event derivation**
+- [ ] **Step 3: Test response/event transaction semantics**
 
-Positive requires marks and summarizes the first final-valid mark. Negative stores null detection time/latency and a separate no-response latency. Preserve negative detection latency. Insert events and response in one transaction, allow only exact duplicate retry, reject differing retry/current-order violations, and advance only after commit.
+Preserve current marks, deletion, yes/no mutual exclusion, first-final-valid positive summary, null no-lesion detection time/latency, separate no-response latency, negative detection latency, correctness derivation from the snapshot, atomic response/events, exact duplicate retry, differing-retry rejection, current-order enforcement, and completion after one response per order.
 
-- [ ] **Step 4: Test terminal transitions**
+- [ ] **Step 4: Test failures and recovery**
 
-Completion occurs only when every queue order has one response. Completed/abandoned/invalid attempts reject new rows. Partial sync requires explicit abandon/invalid transition.
+Simulate busy DB, read-only/disk-full, event insert failure, response insert failure, process restart, WAL reopen, and corrupt package. No failed transaction advances the queue or creates a partial trial.
 
-- [ ] **Step 5: Fault-injection tests**
-
-Simulate busy DB, event insert failure, response insert failure, disk-full/readonly error, process restart, WAL reopen, and corrupt package. Assert no partial trial and no progress advance.
-
-### Task 17: Make LOCAL collection fully SQLite-authoritative
+### Task 11: Expose LOCAL attempt APIs backed only by SQLite
 
 **Files:**
 - Create: `app/api/local/attempts/route.ts`
 - Create: `app/api/local/attempts/[attemptId]/responses/route.ts`
 - Create: `app/api/local/attempts/[attemptId]/abandon/route.ts`
-- Modify: `app/api/assessment/start/route.ts`
-- Modify: `app/api/assessment/response/route.ts`
-- Modify: `components/AssessmentClient.tsx`
-- Modify: `README.md`
+- Create: `app/api/assessment/start/route.ts`
+- Create: `app/api/assessment/response/route.ts`
+- Create: `app/api/assessment/video/route.ts`
+- Modify: `lib/video/localVideoAccessGateway.ts`
 
-**Interfaces:**
-- Produces: complete no-auth, no-network LOCAL participant workflow.
+- [ ] **Step 1: Validate every request server-side**
 
-- [ ] **Step 1: Route all LOCAL active collection to SQLite**
+Reject unknown payload keys including all mode/pool/test/ground-truth fields. LOCAL start derives mode and roster from the sealed package, validates participant ID, and returns no ground truth or filesystem path.
 
-LOCAL start, resume, queue, video authorization, submission, completion, and abandon routes must never instantiate Supabase clients. Remove transitional connected persistence from LOCAL factory while preserving ONLINE adapters.
+- [ ] **Step 2: Replace the Phase 1 fixture authorizer with SQLite**
 
-- [ ] **Step 2: Keep participant UI minimal**
+Every video `GET`/`HEAD` request reopens/queries SQLite, verifies attempt status and first-unanswered order, and reads only the immutable snapshot relative path. No live database call is permitted.
 
-LOCAL shows participant ID and Session 1/2/3 only. No access code, password, sync control, internal attempt validity, or filesystem path appears in participant UI.
+- [ ] **Step 3: P2 gate**
 
-- [ ] **Step 3: Run an offline end-to-end attempt**
-
-Unset all Supabase variables, block network for the process/browser, start on `127.0.0.1`, create participant `LOCALOFFLINE-FORMAL-001`, complete a 40-video formal attempt, restart browser and Next.js mid-session, resume the same attempt/order, and finish. Restart again and confirm Completed is read-only.
-
-- [ ] **Step 4: Verify no network/source leakage**
-
-Browser requests must contain only loopback app/video URLs. Search production output for Supabase calls in LOCAL route chunks and for absolute local paths/ground truth in HTML/JSON/logs.
-
-- [ ] **Step 5: P3 gate**
-
-Run all SQLite/package/video/player tests plus standard gates and a focused code review. Stop for approval before sync work.
+Run SQLite/package/roster/API/video tests plus standard gates. Search Phase 1-2 code for Supabase imports under LOCAL modules and for `studyMode` in browser start payloads. Stop for approval.
 
 ---
 
-## Phase 4: Explicit LOCAL-to-Supabase Synchronization
+## Phase 3: Complete Fully Offline LOCAL Experiment
 
-### Task 18: Define canonical immutable sync payloads
+### Task 12: Wire the current assessment UI to the LOCAL repository
+
+**Files:**
+- Modify: `components/AssessmentClient.tsx`
+- Modify: `components/AssessmentVideoPlayer.tsx`
+- Modify: `components/LesionSurvey.tsx`
+- Modify: `components/AssessmentFlow.test.mjs`
+- Modify: `components/AssessmentVideoPlayer.test.mjs`
+- Modify: `lib/lesionResponse.ts`
+- Modify: `lib/lesionResponse.test.ts`
+
+- [ ] **Step 1: Keep participant intake limited**
+
+LOCAL participant UI shows only participant ID, Session 1/2/3, and explicit attempt selection when required. It never displays or submits study mode, password, access code, roster, package path, video path, or ground truth.
+
+- [ ] **Step 2: Preserve player and response behavior**
+
+Keep first-pass forward-seek restriction, backward seek within watched content, free replay after the first real `ended`, silent video, repeated lesion marks, deletion before submission, yes/no mutual exclusion, No override behavior, response timing from `performance.now()`, millisecond video time, negative detection latency, retry after failed durable write, dynamic queue length, resume, and completion lock.
+
+- [ ] **Step 3: Keep SurveyJS as validation boundary**
+
+Do not add Survey Creator/admin UI. The player consumes only a playback URL and attempt context; it contains no SQLite, filesystem, package, Supabase, Storage, or Auth logic.
+
+### Task 13: Verify a complete disconnected FORMAL experiment
+
+**Files:**
+- Create: `tests/e2e/local-offline-assessment.spec.ts`
+- Create: `playwright.config.ts` if not already present.
+
+- [ ] **Step 1: Start with no Supabase configuration or network**
+
+Unset all Supabase variables, deny outbound network for the app/browser test environment, bind Next.js to `127.0.0.1`, and load a validated FORMAL package plus local MP4 root.
+
+- [ ] **Step 2: Test roster enforcement**
+
+Unknown and typo participant IDs must fail without creating any SQLite attempt/queue rows. An approved coded ID must create exactly one attempt with 40 queue rows from the requested session pool.
+
+- [ ] **Step 3: Complete all 40 videos**
+
+Exercise positive/negative trials, multiple/deleted marks, seek/replay behavior, pause/resume, exact 206 requests, and durable progress. Verify every response/event/timing field directly from SQLite.
+
+- [ ] **Step 4: Test restart recovery**
+
+Restart browser and Next.js mid-session; reopen the same SQLite file; resume the same attempt at the first unanswered order; finish; restart again; show Completed immediately and reject further submission.
+
+- [ ] **Step 5: Prove complete source isolation**
+
+Network logs contain loopback requests only. LOCAL server logs/browser payloads contain no Supabase call, signed URL, service credential, package roster, lesion ground truth, or absolute filesystem path.
+
+### Task 14: Declare the emergency LOCAL system operational
+
+**Files:**
+- Modify: `README.md`
+- Create: `docs/local-offline-operator-runbook.md`
+
+- [ ] **Step 1: Document operator preflight and recovery**
+
+Cover package/roster validation, video hash check, SQLite integrity check, loopback start, participant/session entry, restart recovery, backup of SQLite plus WAL state, terminal attempt export, and clear errors for missing package/video/disk writes.
+
+- [ ] **Step 2: Run P3 final gates**
+
+Run focused tests, full offline Playwright flow, standard gates, and one overall LOCAL code review. Record proof that no Phase 1-3 task required a live attempt migration.
+
+- [ ] **Step 3: Stop for explicit approval**
+
+At this point the Mac must be a genuinely usable emergency experimental system. Do not begin Phase 4 database work until the user explicitly approves it.
+
+---
+
+## Phase 4: Full Live Supabase Preflight and Attempt-Aware Migration
+
+### Task 15: Add the exhaustive live preflight tooling
+
+**Files:**
+- Create: `scripts/supabase/live-preflight.sql`
+- Create: `scripts/supabase/verify-preflight-report.mjs`
+- Create: `scripts/supabase/compare-live-repository.mjs`
+- Create: `scripts/supabase/preflight-tools.test.mjs`
+
+**Interfaces:**
+- Produces ignored raw reports for database catalog/data integrity, deployed Edge Functions, and repository/live comparison.
+
+- [ ] **Step 1: Inventory the actual live environment in one read-only transaction**
+
+Inspect actual schemas/tables/columns/defaults/identity fields; constraints/indexes/predicates/sequences/triggers/extensions; RPC names, identity arguments, return types, definitions, owners, ACLs, grants, security mode, search path, language and volatility; RLS/forced-RLS/policies; schema/table/function privileges; Storage buckets and Storage policies; `assessment_runtime_config`; existence/state of `assessment_session_access`, `assessment_enrollments`, and `assessment_attempts`; exact video/queue/response/event counts; and `supabase_migrations.schema_migrations` when present.
+
+- [ ] **Step 2: Run data-integrity audits**
+
+Count/fingerprint duplicate queue orders/videos, duplicate responses/events, queue gaps, missing-video queue rows, orphan responses/events, queue/child identity mismatches, response completeness, null/unknown attempt IDs, and ambiguous participant/session mode mappings. Exact offending keys stay in an encrypted ignored mode-0600 artifact; committed reports contain salted hashes only.
+
+- [ ] **Step 3: Inspect deployed Edge Functions**
+
+After discovering current official CLI commands, list and inspect/download deployed bundles without secrets. Hash and compare their request/response shapes and RPC calls with repository source. Unknown deployed contracts are blocking.
+
+- [ ] **Step 4: Compare live state with repository history**
+
+Normalize/hash live function definitions and compare them with repository SQL. Classify migration/definition evidence as `matched`, `live_only`, `repository_only`, `diverged`, or `unknown`; filenames alone never prove application.
+
+### Task 16: Publish the P4A verdict
+
+**Files:**
+- Create: `docs/superpowers/audits/2026-08-29-live-supabase-preflight.md`
+
+- [ ] **Step 1: Write the sanitized full audit**
+
+Include all required catalog, permissions, policies, functions, Edge Functions, counts, integrity, runtime config, access/enrollment existence, and migration-history results with raw-report hashes and `database_writes_performed: 0`.
+
+- [ ] **Step 2: Apply blocking semantics**
+
+Use `SAFE_TO_DESIGN_ATTEMPT_MIGRATION` only when every legacy row can be mapped losslessly and the current ECS contract is known. Otherwise use:
+
+```text
+BLOCKED_BY_ENVIRONMENT
+blocks: live_supabase_migration, synchronization_deployment, online_auth_deployment
+does_not_block: local_sqlite, local_study_package, local_video_streaming, offline_local_collection
+database_writes_performed: 0
+```
+
+Stop all remaining Phase 4 migration tasks if blocked. Keep the completed Phase 3 LOCAL system operational.
+
+### Task 17: Build the restored-copy migration harness
+
+**Files:**
+- Create: `supabase/fixtures/legacy-live-shape.sql`
+- Create: `supabase/assessment_attempts.contract.test.mjs`
+
+- [ ] **Step 1: Derive sanitized fixtures from P4A evidence**
+
+Represent empty, partial, complete, DEV, FORMAL, repeated-mark, negative-latency, exact-retry, and Session 1/2/3 states with synthetic IDs.
+
+- [ ] **Step 2: Test deterministic legacy backfill**
+
+Use UUIDv5 namespace `c9811a35-5bb1-422b-85cf-7967240841dc` and exact name bytes `participant_id + chr(31) + session_number`. Preserve bigint IDs, timestamps, answers, timing, and events. Block ambiguous mode, duplicates, and orphans.
+
+- [ ] **Step 3: Snapshot current release contracts**
+
+Tests must preserve the exact live legacy RPC names/signatures/results/grants/errors and current video Edge Function request/response contract used by `d4957edd455e7f99bc71cbde09c23254edabcfac`.
+
+### Task 18: Rehearse Stage A and Stage B compatibility migrations
+
+**Files:**
+- Create through CLI: migration named `assessment_attempts_stage_a`
+- Create through CLI: migration named `legacy_attempt_api_bridge_stage_b`
+- Modify: `supabase/assessment_attempts.contract.test.mjs`
+
+- [ ] **Step 1: Generate migrations only with the official CLI**
+
+```bash
+supabase migration new assessment_attempts_stage_a
+supabase migration new legacy_attempt_api_bridge_stage_b
+```
+
+- [ ] **Step 2: Stage A remains additive**
+
+Create `assessment_attempts` and validity-decision audit, add nullable child `attempt_id`, deterministic legacy attempts, immutable/status/validity constraints, and compatible attempt-aware indexes while keeping all old uniqueness and APIs.
+
+- [ ] **Step 3: Stage B scopes legacy APIs without changing their contracts**
+
+Bind legacy session access to one legacy attempt. Replace function bodies only so all queue/progress/response/event/video queries are attempt-scoped. Keep names, signatures, result shapes, credentials, errors, grants, and the legacy Edge Function contract unchanged. Harden every privileged function owner/search path/grant.
+
+- [ ] **Step 4: Rehearse on a restored live copy**
+
+Apply twice from fresh restores, compare pre/post counts/hashes, run contract/security/advisor tests, and run the unchanged `d4957ed` browser through start, random queue, resume, signed video, positive/negative submission, event insert, retry, next order, and completion.
+
+### Task 19: Obtain approval and apply Stage A/B, then rehearse Stage C
+
+**Files:**
+- Create through CLI after P4B approval: migration named `activate_attempt_constraints_stage_c`
+
+- [ ] **Step 1: Stop for explicit live Stage A/B approval**
+
+Present P4A evidence, exact SQL diff, backup/restore procedure, lock/runtime estimate, restored-copy proof, and unchanged-release smoke protocol. General implementation approval is insufficient.
+
+- [ ] **Step 2: Re-run full preflight and take a recoverable backup**
+
+Abort if catalog hashes, functions, Edge Functions, policies, counts, or integrity findings changed. Apply only approved Stage A/B, then read back counts/constraints/grants/RLS/advisors and run the unchanged ECS browser smoke tests with dedicated IDs.
+
+- [ ] **Step 3: Rehearse Stage C separately**
+
+On a fresh post-B restore, drop old participant/session uniqueness only after all child attempt IDs are valid; activate attempt-scoped uniqueness/composite FKs/`NOT NULL`; prove multiple attempts for one participant/session work and within-attempt duplicates/mismatches fail.
+
+- [ ] **Step 4: Stop for separate Stage C approval**
+
+Repeat backup, preflight, controlled apply, post-check, and unchanged-release browser verification only after approval naming Stage C. Keep legacy access-code APIs and legacy Edge Function for rollback.
+
+- [ ] **Step 5: P4C gate**
+
+Only a verified P4C state permits synchronization or ONLINE Auth deployment. LOCAL remains independently operational regardless of P4 outcome.
+
+---
+
+## Phase 5: LOCAL-to-Supabase Synchronization
+
+### Task 20: Build canonical immutable local payloads
 
 **Files:**
 - Create: `lib/sync/canonicalPayload.ts`
 - Create: `lib/sync/canonicalPayload.test.ts`
 - Create: `lib/sync/localAttemptExporter.ts`
 
-**Interfaces:**
-- Produces:
+- [ ] **Step 1: Define canonical payload version 1**
 
-```ts
-export type SyncAttempt = {
-  attemptId: string;
-  participantId: string;
-  sessionNumber: 1 | 2 | 3;
-  runtimeChannel: "local";
-  studyMode: "dev" | "formal";
-  status: "completed" | "abandoned" | "invalid";
-  validForAnalysis: false;
-  replacesAttemptId: string | null;
-  startedAt: string;
-  completedAt: string | null;
-  studyPackageChecksum: string;
-  schemaVersion: 1;
-  createdAt: string;
-  updatedAt: string;
-};
-export type SyncQueueRow = {
-  attemptId: string;
-  participantId: string;
-  sessionNumber: 1 | 2 | 3;
-  videoId: string;
-  videoOrder: number;
-  createdAt: string;
-};
-export type SyncResponseRow = {
-  attemptId: string;
-  participantId: string;
-  sessionNumber: 1 | 2 | 3;
-  videoId: string;
-  videoOrder: number;
-  answer: boolean;
-  correct: boolean;
-  responseTimeMs: number;
-  videoTimeAtClick: string | null;
-  detectionLatencyMs: number | null;
-  responseType: "lesion_detected" | "no_lesion_detected";
-  videoCompleted: true;
-  noResponseLatencyMs: number | null;
-  createdAt: string;
-};
-export type SyncEventRow = {
-  attemptId: string;
-  participantId: string;
-  sessionNumber: 1 | 2 | 3;
-  videoId: string;
-  videoOrder: number;
-  clickIndex: number;
-  videoTimeAtClick: string;
-  responseTimeMs: number;
-  lesionOnsetSec: string | null;
-  detectionLatencyMs: number | null;
-  overridden: boolean;
-  finalValid: boolean;
-  createdAt: string;
-};
-export type SyncPackageManifest = LocalStudyPackageV1;
-export type LocalAttemptSyncPayloadV1 = {
-  schemaVersion: 1;
-  attempt: SyncAttempt;
-  queue: SyncQueueRow[];
-  responses: SyncResponseRow[];
-  events: SyncEventRow[];
-  studyPackage: SyncPackageManifest;
-};
-export function canonicalizeAndHash(payload: LocalAttemptSyncPayloadV1): {
-  canonicalJson: string;
-  sha256: string;
-};
-```
+Include attempt metadata, ordered queue, ordered responses, ordered events, original UUID/timestamps, package checksum/manifest, and schema version. Encode timestamps as UTC ISO-8601 with exactly three fractional digits; media seconds as three-decimal strings; durations/latencies as integers.
 
-- [ ] **Step 1: Fix the wire representation**
+- [ ] **Step 2: Hash deterministically**
 
-Sort queue by order, responses by order, and events by order/click index. Encode every timestamp as UTC ISO-8601 with exactly three fractional digits. Encode media seconds as decimal strings with exactly three digits, and latency/duration as integers, so JSON parsing never changes recorded precision.
+Sort by natural keys, serialize with RFC 8785, calculate SHA-256, and freeze the digest locally before upload. Reject in-progress attempts, integrity failures, duplicate keys, package mismatch, and any payload mutation after digest creation.
 
-- [ ] **Step 2: Test deterministic RFC 8785 hashing**
-
-Same semantic payload from different object insertion order yields the same digest; one field change changes the digest; non-finite numbers, duplicate natural keys, in-progress attempts, package mismatch, and integrity-check failure block export.
-
-- [ ] **Step 3: Freeze the local terminal payload**
-
-Store the SHA-256 before upload. Once digest is stored for a terminal attempt, any local data difference is a local corruption/conflict and must not produce a replacement digest silently.
-
-### Task 19: Design and rehearse the atomic sync and validity RPCs
+### Task 21: Rehearse the atomic sync and validity migration
 
 **Files:**
 - Create through CLI: migration named `local_attempt_sync_rpc`
 - Create: `supabase/local_attempt_sync.contract.test.mjs`
 
-**Interfaces:**
-- Produces service-role-only functions:
+- [ ] **Step 1: Create service-role-only private functions**
 
-```text
-private.sync_local_assessment_attempt(p_payload jsonb, p_payload_sha256 text) -> jsonb
-private.set_assessment_attempt_validity(p_attempt_id uuid, p_replace_existing boolean, p_reason text) -> jsonb
-```
+`private.sync_local_assessment_attempt(jsonb,text)` validates schema/package/digest, locks attempt and participant/session, verifies queue/video/timing/event semantics, and inserts attempt/queue/responses/events in one transaction. `private.set_assessment_attempt_validity(uuid,boolean,text)` performs explicit locked/audited validity changes.
 
-- [ ] **Step 1: Generate the migration only after P3 approval**
+- [ ] **Step 2: Test conflicts and replacement attempts**
 
-```bash
-supabase migration new local_attempt_sync_rpc
-```
+Cover: no prior attempt; incomplete ONLINE attempt plus replacement LOCAL attempt; existing completed valid attempt; identical same-ID retry; differing same-ID payload. Never merge attempts, move child rows, clear validity silently, or leave partial inserts.
 
-- [ ] **Step 2: Implement one transactional import boundary**
+- [ ] **Step 3: Security and restored-copy gate**
 
-Validate schema/package versions, digest, terminal status, identity, pool, queue continuity, video metadata, correctness, timing, event semantics, replacement identity, and current valid attempt. Take advisory locks for attempt ID and participant/session. Insert attempt/queue/responses/events atomically with original UUID/timestamps and PostgreSQL-generated bigint IDs.
+Revoke `PUBLIC`, `anon`, and `authenticated`; grant only service role; use trusted owner, empty search path, schema-qualified objects, advisors, and restored-copy rollback tests. Deployment requires separate approval plus fresh P4 preflight/backup.
 
-- [ ] **Step 3: Implement Cases A-E exactly**
-
-Return structured `imported`, `idempotent`, or `conflict` results. Identical same-ID payload creates no rows. Different same-ID payload changes no rows. Existing valid attempt never clears automatically. Child failure rolls back all rows.
-
-- [ ] **Step 4: Implement audited validity resolution**
-
-Require trusted operator context, completed selected attempt, explicit replacement confirmation/reason, participant/session advisory lock, and one audit row containing previous/new attempt and operator identity.
-
-- [ ] **Step 5: Security review and restored-copy tests**
-
-Keep functions in `private`, revoke `PUBLIC`/`anon`/`authenticated`, grant only `service_role`, set empty search path, schema-qualify all objects, and run database advisors. Test Cases A-E and rollback against restored data.
-
-- [ ] **Step 6: Stop for separate live sync-migration approval**
-
-Repeat P0 delta check, backup, apply, grants/advisors/count checks, and unchanged-release browser smoke only after approval naming the sync migration.
-
-### Task 20: Add the explicit operator sync command
+### Task 22: Add explicit operator synchronization
 
 **Files:**
 - Create: `lib/sync/syncClient.ts`
 - Create: `lib/sync/syncClient.test.ts`
-- Create: `scripts/local/sync-terminal-attempt.mjs`
+- Create: `scripts/local-study/sync-terminal-attempt.mjs`
 - Modify: `package.json`
-
-**Interfaces:**
-- Consumes: terminal local attempt and server-only Supabase URL/service-role key.
-- Produces: local sync state transitions and operator-readable conflict result.
 
 - [ ] **Step 1: Keep sync outside participant flow**
 
-Add `npm run local:sync -- --attempt-id=8a4db86e-2eb8-4ff7-bffd-46a5f5eea2b3` as the documented example for the explicit operator command. It refuses non-loopback/local mode, missing service-role key, in-progress attempt, failed local integrity, or payload mismatch. It never runs on page load or in the background.
+Expose only an explicit operator command for terminal `completed`, `abandoned`, or `invalid` attempts. Missing credentials disable sync only; LOCAL collection remains usable. Never sync automatically or from page load.
 
-- [ ] **Step 2: Implement sync state transitions**
+- [ ] **Step 2: Implement idempotent state transitions**
 
-Use `never_synced|sync_failed|conflict -> syncing -> synced|sync_failed|conflict`. Record local attempt ID, digest, RPC result code, timestamps, and sanitized error. Set `synced_at` only after atomic success or explicit conflict resolution.
+Use `never_synced|sync_failed|conflict -> syncing -> synced|sync_failed|conflict`. Set `synced_at` only after atomic acceptance or explicit conflict resolution. Preserve original attempt ID, queue order, timestamps, marks, and timing.
 
-- [ ] **Step 3: Test network failure and retries**
+- [ ] **Step 3: Verify field-for-field readback**
 
-Timeout before server acceptance, timeout after acceptance, repeated exact payload, differing payload, package conflict, existing valid attempt, and child rollback must produce deterministic local state without duplicates.
+Run synthetic Cases A-E, network-loss-before/after-acceptance, retry, differing-payload, and child-failure tests. Compare every imported natural key/value with SQLite and prove analysis never combines attempts.
 
-### Task 21: P4 end-to-end synchronization gate
+- [ ] **Step 4: P5 gate**
 
-**Files:**
-- Modify: `README.md`
-- Modify: `docs/environment-and-release-workflow.md`
-
-- [ ] **Step 1: Sync synthetic terminal attempts for Cases A-E**
-
-Use dedicated `LOCALSYNC-*` participant IDs in the approved non-production or live test scope. Read back canonical attempt/queue/response/event rows and compare every natural key, timestamp, mark, answer, and timing value with SQLite.
-
-- [ ] **Step 2: Prove analysis isolation**
-
-Query only `status='completed' AND valid_for_analysis=true` attempts and show no join can fill missing orders from a second attempt.
-
-- [ ] **Step 3: Run standard gates and code review**
-
-Stop for approval before ONLINE Auth work.
+Run focused/standard tests and review. Stop for ONLINE Auth approval.
 
 ---
 
-## Phase 5: ONLINE Account Pool and Supabase Auth
+## Phase 6: ONLINE Account Pool and Supabase Auth
 
-### Task 22: Add private participant account mapping and login throttling
+### Task 23: Create account mapping and roster-matched provisioning
 
 **Files:**
 - Create through CLI: migration named `online_participant_auth`
-- Create: `supabase/online_auth.contract.test.mjs`
-
-**Interfaces:**
-- Produces private account mapping, rate-limit state, and authenticated ownership helpers.
-
-- [ ] **Step 1: Generate migration after P4 approval**
-
-```bash
-supabase migration new online_participant_auth
-```
-
-- [ ] **Step 2: Create non-exposed private tables**
-
-Create `private.assessment_participant_accounts` exactly as specified and a private rate-limit table keyed by a one-way participant identifier plus coarse client signal. No plaintext password, password hash, access code, or participant-facing email enters public tables.
-
-- [ ] **Step 3: Add ownership helpers**
-
-Private `SECURITY DEFINER` helpers map `auth.uid()` to one active participant, use empty search path/schema-qualified objects, expose no internal email, and have explicit grants only to the functions that require them.
-
-- [ ] **Step 4: Test authorization failures**
-
-Inactive mapping, absent mapping, edited participant ID, another user's attempt, expired JWT, anonymous call, and user metadata manipulation must all fail without revealing account existence.
-
-### Task 23: Provision participant accounts safely
-
-**Files:**
 - Create: `scripts/online/provision-participant-accounts.mjs`
 - Create: `scripts/online/provision-participant-accounts.test.mjs`
-- Modify: `package.json`
+- Create: `supabase/online_auth.contract.test.mjs`
 
-**Interfaces:**
-- Consumes: coordinator CSV containing participant IDs and an operator-selected credential output path outside Git.
-- Produces: one pre-confirmed Supabase Auth user and one private mapping per participant, with one 12-character password reused across Sessions 1-3.
+- [ ] **Step 1: Create private account/rate-limit tables**
 
-- [ ] **Step 1: Test normalization and password generation**
+Map one Auth UUID to one coded participant ID and internal email in a non-exposed private schema. Store no plaintext password, password hash, or access code in public study tables. Add tightly scoped login rate-limit state.
 
-Reject empty/duplicate/confusable participant IDs. Generate 12 characters from `ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789` using `crypto.randomInt`; never log passwords or send them to browser logs.
+- [ ] **Step 2: Require exact roster equality**
 
-- [ ] **Step 2: Implement idempotent provisioning**
+Provisioning reads the approved FORMAL package roster and refuses extra, missing, duplicate, or differently normalized IDs. Thus LOCAL roster and ONLINE account pool use the same coded participant IDs. The package remains password-free.
 
-Create a deterministic opaque internal email domain representation, call Auth Admin server-side, insert private mapping, and compensate by deleting/revoking the new Auth user if mapping insertion fails. Existing matching mapping returns unchanged; conflicting Auth/mapping identity stops.
+- [ ] **Step 3: Provision idempotently**
 
-- [ ] **Step 3: Protect coordinator output**
+Generate one 12-character unambiguous random password per participant, reused for Sessions 1-3. Create/pre-confirm Auth user, insert mapping, compensate on partial failure, and write credentials once to an operator-selected mode-0600 file outside Git. Stdout shows counts only.
 
-Write participant ID/password once to an operator-specified file opened with mode `0600` outside the repository. Stdout reports counts only.
-
-### Task 24: Add participant-ID/password sign-in Edge Function
+### Task 24: Add participant-ID/password sign-in
 
 **Files:**
 - Create: `supabase/functions/participant-sign-in/index.ts`
 - Create: `supabase/functions/participant-sign-in/deno.json`
-- Test: `supabase/functions/participant-sign-in/index.test.ts`
+- Create: `supabase/functions/participant-sign-in/index.test.ts`
 
-**Interfaces:**
-- Consumes: `{ participant_id, password }`.
-- Produces: normal Supabase Auth session response or one generic invalid-credential response.
+- [ ] **Step 1: Keep authentication separate from assessment start**
 
-- [ ] **Step 1: Test privacy and throttling**
+`OnlineAuthCredentials` contains participant ID and password. After login, assessment start contains session and optional attempt selection; the server derives participant identity and study mode. Neither Auth nor start accepts participant-controlled study mode.
 
-Unknown participant, wrong password, inactive mapping, wrong internal mapping, and throttled request return the same generic status/body. Password/internal email/service key never appears in logs or responses.
+- [ ] **Step 2: Implement generic errors and rate limiting**
 
-- [ ] **Step 2: Implement trusted lookup and normal password sign-in**
+Resolve private internal email in trusted context, use normal Supabase password sign-in, return a session or one generic invalid-credential response, and never log password/internal email/service key. Unknown, inactive, wrong-password, and throttled cases do not reveal account existence.
 
-The Edge Function uses its service context only to resolve the private internal email, then performs normal Supabase password sign-in. It returns session tokens required by `supabase-js`, applies the database-backed rate limit, and clears/ages successful counters without exposing account existence.
-
-- [ ] **Step 3: Deploy only to an approved non-production/test function name first**
-
-Inspect current CLI docs/help, deploy, verify JWT/session issuance, and run logs/security review. Live deployment requires separate approval and does not alter the legacy function.
-
-### Task 25: Add authenticated attempt RPCs and v2 private-video function
+### Task 25: Add authenticated attempt RPCs and private-video v2 function
 
 **Files:**
 - Create through CLI: migration named `online_attempt_rpc_v2`
 - Create: `supabase/functions/issue-assessment-video-url-v2/index.ts`
 - Create: `supabase/functions/issue-assessment-video-url-v2/deno.json`
+- Create: `lib/supabase/browserClient.ts`
 - Create: `lib/online/onlineAssessmentRepository.ts`
 - Create: `lib/online/remoteVideoAccessGateway.ts`
-- Create: `lib/supabase/browserClient.ts`
 
-**Interfaces:**
-- Produces versioned authenticated APIs accepting attempt/session/trial data without trusted participant ID.
+- [ ] **Step 1: Bind attempts to `auth.uid()`**
 
-- [ ] **Step 1: Implement v2 RPC ownership/current-order enforcement**
+Start/resume/submit RPCs derive active participant from private mapping and study mode from database configuration. Accept session/attempt/trial data, never trusted participant ID or mode. Enforce ownership, runtime channel, status, session, current order, and duplicate semantics.
 
-Start/resume and submit functions require `auth.uid()`, derive participant through private mapping, validate channel/session/status/attempt ownership, select or explicitly request an in-progress attempt, and enforce first-unanswered order. Do not trust editable metadata or browser participant ID.
+- [ ] **Step 2: Authorize one private current video**
 
-- [ ] **Step 2: Implement v2 video authorization**
+The v2 Edge Function requires a valid user JWT and accepts attempt ID plus video order only. It verifies mapped ownership/current order, obtains bucket/path internally, and returns one temporary signed URL. Anonymous direct Storage access and LOCAL fallback remain forbidden.
 
-The Edge Function requires user JWT, receives attempt ID/order only, validates ownership and first unanswered order through v2 RPC, signs exactly one private bucket/path, and returns signed URL/order/expiry. Anonymous/direct Storage access remains denied; no LOCAL fallback exists.
+- [ ] **Step 3: Rehearse before deployment**
 
-- [ ] **Step 3: Configure browser Auth safely**
+Run RLS/grant/advisor/JWT/ownership/private-video/three-session tests on the approved test/restored environment. Live migration/functions require separate approval and fresh P4 verification.
 
-Use publishable URL/key only. Persist and refresh the user session for ONLINE. Never place service role, internal email, password, signed URL, or local paths in logs.
-
-- [ ] **Step 4: Rehearse migration and functions**
-
-Run ownership, RLS, grant, advisor, JWT, signed-video, duplicate response, resume, and three-session tests in the approved test environment. Stop for explicit live migration/function deployment approval.
-
-### Task 26: Replace ONLINE access-code UI with Auth while preserving LOCAL no-auth
+### Task 26: Update ONLINE UI and complete Auth verification
 
 **Files:**
 - Modify: `components/AssessmentClient.tsx`
 - Modify: `components/AssessmentFlow.test.mjs`
 - Create: `components/OnlineAuthentication.test.mjs`
 - Modify: `.env.production.example`
-- Modify: `README.md`
 
-**Interfaces:**
-- Consumes: server-provided deployment mode and Tasks 24/25 adapters.
-- Produces: LOCAL participant/session intake and ONLINE participant/password/session intake.
+- [ ] **Step 1: Keep mode-specific inputs correct**
 
-- [ ] **Step 1: Test mutually exclusive intake forms**
+LOCAL shows participant ID/session/attempt choice only. ONLINE authentication shows participant ID/password; assessment choice shows Session 1/2/3 and attempt choice. Neither flow shows or sends Study access code or study mode.
 
-LOCAL has no password/access code and works without Supabase variables. ONLINE requires participant ID/password/session and has no Study access code. Browser attempts to force LOCAL mode cannot change server route behavior.
+- [ ] **Step 2: Verify ONLINE isolation and ownership**
 
-- [ ] **Step 2: Implement ONLINE sign-in/session lifecycle**
+Test valid/invalid login, participant-ID editing, inactive user, Sessions 1-3, attempt resume/choice, private video, marks, yes/no, retry, completion, logout, and expired session. ONLINE must never open SQLite or local routes.
 
-Sign in through `participant-sign-in`, bind UI participant display to the authenticated mapped account, handle expired/revoked sessions by returning to login, and reuse one account across Sessions 1-3.
+- [ ] **Step 3: P6 gate**
 
-- [ ] **Step 3: Real-browser ONLINE verification**
-
-Verify valid/invalid login, impersonation attempt, Sessions 1-3 isolation, queue creation/resume, current video, direct private Storage denial, marks, yes/no, duplicate retry, completion, logout, and expired session. ONLINE must not open SQLite or access local routes.
-
-- [ ] **Step 4: P5 gate**
-
-Run focused tests, standard gates, Supabase advisors, and one overall code review. Keep old access-code APIs, legacy Edge Function, `release`, and ECS unchanged. Stop for release approval.
+Run focused/standard tests, advisors, real-browser smoke, and one overall review. Keep legacy access APIs for rollback. Stop for release approval.
 
 ---
 
-## Phase 6: Explicit Manual Release Promotion
+## Phase 7: Explicit Manual Release Promotion
 
-### Task 27: Promote only after explicit production approval
+### Task 27: Promote only explicitly approved commits
 
 **Files:**
 - Modify only after approval: `docs/environment-and-release-workflow.md`
 - Modify only after approval: `docs/alibaba-ecs-deployment.md`
-- Do not create CI/CD, webhook, scheduled deployment, or automatic sync files.
+- Do not add CI/CD, webhook, scheduled deployment, automatic sync, or automatic promotion files.
 
-**Interfaces:**
-- Consumes: approved P5 commit set and known-good release SHA.
-- Produces: manually promoted `release` and verified ECS deployment.
+- [ ] **Step 1: Record branch and ECS state**
 
-- [ ] **Step 1: Record all branch/deployment SHAs**
+Record local/origin `main`, local/origin `release`, and current ECS SHA. The expected unchanged baseline is `d4957edd455e7f99bc71cbde09c23254edabcfac` unless a separately documented approved deployment changed it.
 
-Record local `main`, `origin/main`, local `release`, `origin/release`, and current ECS SHA. The expected pre-promotion ECS/release baseline remains `d4957edd455e7f99bc71cbde09c23254edabcfac` unless a separately documented deployment changed it.
+- [ ] **Step 2: Present exact promotion commits**
 
-- [ ] **Step 2: Present the exact promotion set**
+Fast-forward only if every intervening commit is approved; otherwise cherry-pick only named approved commits. Do not merge unrelated `main` work. Obtain explicit approval before changing `release`.
 
-Use fast-forward only when every intervening commit is approved; otherwise cherry-pick only named approved commits. Do not merge unrelated `main` work. Obtain explicit promotion approval before changing `release`.
+- [ ] **Step 3: Validate and deploy manually**
 
-- [ ] **Step 3: Validate `release` before push**
+On `release`, run `npm ci`, typecheck, tests, build, and secret/path/package/SQLite/video leak scans. On ECS, record prior SHA, fetch/switch/pull `origin/release --ff-only`, repeat gates, restart PM2, and run HTTP/Auth/attempt/queue/signed-video/response/resume/completion/analysis smoke tests.
 
-```bash
-npm ci
-npm run typecheck
-npm test
-npm run build
-git diff d4957edd455e7f99bc71cbde09c23254edabcfac..HEAD --check
-```
+- [ ] **Step 4: Roll back on failure**
 
-Verify `.env.production.local`, service-role values, credential exports, SQLite/package files, local paths, dumps, and videos are absent from commits.
+Checkout the recorded known-good release commit/tag, run `npm ci`, build, restart PM2, and repeat verification. Never roll back by switching ECS to `main`.
 
-- [ ] **Step 4: Push and manually deploy ECS only after approval**
+- [ ] **Step 5: Delay legacy access cleanup**
 
-On ECS: record previous SHA, fetch origin, switch to `release`, pull `--ff-only`, `npm ci`, typecheck, test, build, restart PM2 with updated environment, and run HTTP/Auth/attempt/queue/signed-video/response/resume/completion/analysis smoke tests. Port 3000 remains bound to `127.0.0.1`; Nginx exposes port 80/HTTPS later.
-
-- [ ] **Step 5: Roll back on any failed smoke test**
-
-Checkout the recorded previous known-good release commit/tag, run `npm ci`, build, restart PM2, and repeat verification. Database compatibility must allow the old release to continue through this rollback window.
-
-- [ ] **Step 6: Delay Stage D cleanup**
-
-Do not revoke/remove old access-code RPCs, old Edge Function, `assessment_session_access`, or `assessment_enrollments` in this release. After a separately approved rollback window, generate a new migration with `supabase migration new remove_legacy_access_code_stage_d`, prove no active old client depends on it, back up, rehearse, obtain explicit approval, and preserve all attempts/queues/responses/events.
+Do not remove old access-code RPCs, legacy Edge Function, `assessment_session_access`, or `assessment_enrollments` in this release. After a separately approved rollback window, generate a dedicated Stage D cleanup migration, rehearse, back up, obtain approval, and preserve every attempt/queue/response/event row.
 
 ---
 
-## Final Verification Matrix
+## Final Self-Review and Verification Matrix
 
-- [ ] P0 report proves actual live schema, constraints, indexes, RPC signatures, owners/grants, RLS/policies, Storage policies, Edge Functions, runtime config, table existence, row counts, integrity findings, and migration history.
-- [ ] Legacy backfill is deterministic, idempotent, lossless, and blocks ambiguity.
-- [ ] Unchanged `d4957ed` works through approved compatibility stages.
-- [ ] LOCAL works from a new formal start through 40-video completion with all network disabled.
-- [ ] LOCAL browser/process restart resumes the exact same attempt and order.
-- [ ] LOCAL current-video route passes 200/206/416/HEAD and traversal/symlink/current-order tests.
-- [ ] LOCAL collection never invokes Supabase; ONLINE never invokes SQLite/local files.
-- [ ] Sync is explicit, terminal-only, atomic, digest-idempotent, conflict-preserving, and read back field-for-field.
-- [ ] No analysis query combines attempts; validity selection is explicit and audited.
-- [ ] ONLINE Auth binds `auth.uid()` to participant ownership and resists participant-ID editing.
-- [ ] Private Storage remains private and every signed URL is attempt/current-order authorized.
-- [ ] Study access code remains only in the legacy rollback bridge until separately approved Stage D cleanup.
-- [ ] `release` and ECS remain unchanged until Phase 6 receives explicit promotion approval.
-- [ ] Every phase passes focused tests, `npm run typecheck`, `npm test`, `npm run build`, and its review checkpoint.
+- [ ] Dependency graph shows no Phase 1-3 task consumes a new live Supabase table, migration, RPC, Auth user, or Edge Function.
+- [ ] Phase 0A uncertainty does not block LOCAL implementation; it blocks only real package readiness where metadata are missing and all Phase 4-6 live deployment work.
+- [ ] `ParticipantStartInput` contains only participant ID, Session 1/2/3, and optional attempt ID.
+- [ ] No participant/browser payload accepts `studyMode` or `study_mode`.
+- [ ] LOCAL mode is selected only by the sealed server-loaded package; ONLINE mode is selected only by trusted database/server configuration.
+- [ ] FORMAL LOCAL package contains a normalized approved coded-ID roster and no passwords, emails, Auth UUIDs, hashes, or access codes.
+- [ ] FORMAL LOCAL start rejects unknown/typo participant IDs before any attempt/queue write.
+- [ ] ONLINE account provisioning requires exact equality with the FORMAL package roster.
+- [ ] LOCAL path/Range/current-order route passes 200/206/416/HEAD, traversal, symlink, missing-file, and future-order tests.
+- [ ] LOCAL SQLite owns attempt IDs, queue, responses, events, progress, completion, and recovery before any live attempt migration.
+- [ ] A new approved participant completes all 40 FORMAL videos with network disabled and resumes after browser/Next.js restart.
+- [ ] LOCAL collection makes no Supabase/Storage requests; ONLINE makes no SQLite/local-file requests.
+- [ ] P4 full preflight identifies actual tables/columns, constraints/indexes, RPC signatures, owners/grants, RLS/policies, Storage policies, Edge Functions, config/access/enrollment state, row counts, integrity, and applied/diverged migration evidence.
+- [ ] `BLOCKED_BY_ENVIRONMENT` blocks live migration, sync deployment, and Auth deployment but leaves the Phase 3 LOCAL system usable.
+- [ ] No live migration occurs without fresh preflight, backup, restored-copy rehearsal, unchanged-release compatibility proof, and separate approval.
+- [ ] Sync is terminal-only, atomic, idempotent, conflict-preserving, replacement-aware, and field-for-field verified.
+- [ ] ONLINE Auth binds participant ownership to `auth.uid()` and keeps private Storage private.
+- [ ] `release` and ECS remain unchanged until Phase 7 receives explicit promotion approval.
+- [ ] Each phase runs focused tests, `npm run typecheck`, `npm test`, `npm run build`, and its review checkpoint.
