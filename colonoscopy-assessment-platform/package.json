@@ -6,13 +6,18 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:local-package": "node scripts/local-study/build-package.mjs",
     "start": "next start",
-    "test": "node --test components/*.test.mjs lib/*.test.ts supabase/*.test.mjs",
+    "test": "node --test components/*.test.mjs lib/**/*.test.ts lib/local/sqlite/*.test.ts app/**/*.test.ts supabase/*.test.mjs",
     "upload:video": "node scripts/upload-video.mjs",
+    "verify:local-build-isolation": "node scripts/local-study/verify-browser-build.mjs",
+    "validate:local-package": "node scripts/local-study/validate-package.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.55.0",
+    "better-sqlite3": "13.0.3",
+    "canonicalize": "4.0.0",
     "lucide-react": "^0.468.0",
     "next": "^16.3.0",
     "react": "^19.1.0",
@@ -21,6 +26,7 @@
     "survey-react-ui": "^2.5.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

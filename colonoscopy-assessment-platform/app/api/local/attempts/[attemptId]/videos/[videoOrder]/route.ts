@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 import type { CurrentVideoAuthorizationRepository } from "../../../../../../../lib/assessment/contracts.ts";
+import { withLocalAssessmentRepository } from "../../../../../../../lib/local/localRuntime.ts";
 import type { DeploymentMode } from "../../../../../../../lib/runtime/deploymentMode.ts";
 import { readDeploymentMode } from "../../../../../../../lib/runtime/deploymentMode.ts";
 import {
@@ -244,14 +245,16 @@ export function createLocalVideoRouteHandlers(
   };
 }
 
-const unavailableAuthorizationRepository: CurrentVideoAuthorizationRepository = {
-  async authorizeCurrentVideo() {
-    throw new Error("The LOCAL attempt repository is not connected.");
+const sqliteAuthorizationRepository: CurrentVideoAuthorizationRepository = {
+  async authorizeCurrentVideo(attemptId, videoOrder) {
+    return withLocalAssessmentRepository(false, (repository) =>
+      repository.authorizeCurrentVideo(attemptId, videoOrder)
+    );
   }
 };
 
 const handlers = createLocalVideoRouteHandlers({
-  authorizationRepository: unavailableAuthorizationRepository
+  authorizationRepository: sqliteAuthorizationRepository
 });
 
 export const GET = handlers.GET;

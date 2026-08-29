@@ -38,3 +38,15 @@ export function createVideoAuthorizationRepository(
 ): CurrentVideoAuthorizationRepository {
   return requireModeRepository("video authorization", mode, repositories);
 }
+
+export function createLocalRepositoryPair<T extends AssessmentRepository & CurrentVideoAuthorizationRepository>(
+  repository: T
+): {
+  assessmentRepository: AssessmentRepository;
+  videoAuthorizationRepository: CurrentVideoAuthorizationRepository;
+} {
+  return {
+    assessmentRepository: repository,
+    videoAuthorizationRepository: repository
+  };
+}
