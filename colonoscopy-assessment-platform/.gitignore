@@ -10,3 +10,11 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .DS_Store
+artifacts/local-study-snapshot/
+artifacts/supabase-preflight/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.study-package.json
+*.participant-roster.csv
+*.supabase-preflight.dump
