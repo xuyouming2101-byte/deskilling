@@ -101,6 +101,38 @@ test("integrates the player through a source-neutral assessment gateway", () => 
   assert.doesNotMatch(assessmentClientSource, /<video\b/);
 });
 
+test("uses one injectable shared assessment tree for LOCAL and ONLINE", () => {
+  assert.match(assessmentClientSource, /gateway\?: BrowserAssessmentGateway/);
+  assert.equal(assessmentClientSource.match(/<AssessmentVideoPlayer/g)?.length, 1);
+  assert.equal(assessmentClientSource.match(/<LesionSurvey/g)?.length, 1);
+  assert.equal(assessmentClientSource.match(/className="assessment-grid"/g)?.length, 1);
+  assert.equal(assessmentClientSource.match(/className="complete-panel"/g)?.length, 3);
+  assert.doesNotMatch(
+    assessmentClientSource,
+    /deploymentMode\s*===|deploymentMode\s*!==|LocalAssessmentClient|OnlineAssessmentClient/
+  );
+});
+
+test("keeps the golden two-column intake shell without source-specific wording", () => {
+  assert.match(assessmentClientSource, /<aside className="protocol-panel"/);
+  assert.match(assessmentClientSource, />Eligible videos</);
+  assert.match(assessmentClientSource, />Server controlled</);
+  assert.match(assessmentClientSource, />Private study videos</);
+  assert.match(assessmentClientSource, />Recorded securely</);
+  assert.doesNotMatch(
+    assessmentClientSource,
+    /Supabase ready|Supabase not configured|Private Supabase Storage|public\.responses|SQLite/
+  );
+  assert.match(
+    globalStylesSource,
+    /\.intake-grid,\s*\.assessment-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 360px;/s
+  );
+  assert.match(
+    globalStylesSource,
+    /@media \(max-width: 920px\)[\s\S]*?\.protocol-panel\s*\{[^}]*order:\s*-1;/
+  );
+});
+
 test("keeps LOCAL participant intake limited to ID and Session 1/2/3", () => {
   assert.match(assessmentClientSource, />Participant ID</);
   assert.match(assessmentClientSource, />Session number</);

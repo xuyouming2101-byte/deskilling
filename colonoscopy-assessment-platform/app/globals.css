@@ -129,12 +129,7 @@ h2 {
   box-shadow: 0 8px 22px rgba(21, 24, 23, 0.06);
 }
 
-.intake-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 720px);
-  justify-content: center;
-}
-
+.intake-grid,
 .assessment-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
@@ -796,6 +791,10 @@ h2 {
   .intake-grid,
   .assessment-grid {
     grid-template-columns: 1fr;
+  }
+
+  .protocol-panel {
+    order: -1;
   }
 }
 

@@ -10,6 +10,7 @@
     "start": "next start",
     "test": "node --test components/*.test.mjs lib/**/*.test.ts lib/local/sqlite/*.test.ts app/**/*.test.ts supabase/*.test.mjs",
     "test:e2e:local": "playwright test tests/e2e/local-offline-assessment.spec.ts",
+    "test:e2e:ui-parity": "playwright test tests/e2e/assessment-ui-parity.spec.ts",
     "upload:video": "node scripts/upload-video.mjs",
     "verify:local-build-isolation": "node scripts/local-study/verify-browser-build.mjs",
     "validate:local-package": "node scripts/local-study/validate-package.mjs",

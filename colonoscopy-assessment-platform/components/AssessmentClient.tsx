@@ -28,6 +28,7 @@ import {
 } from "@/lib/sessionConfig";
 import {
   createBrowserAssessmentGateway,
+  type BrowserAssessmentGateway,
   type BrowserVideoQueueItem
 } from "@/lib/assessment/browserAssessmentGateway";
 import { captureVideoTimeAtClick } from "@/lib/timing";
@@ -40,14 +41,18 @@ type CompletedSession = {
   totalVideos: number;
 };
 
-export default function AssessmentClient({
-  deploymentMode
-}: {
+type AssessmentClientProps = {
   deploymentMode: "local" | "online";
-}) {
+  gateway?: BrowserAssessmentGateway;
+};
+
+export default function AssessmentClient({
+  deploymentMode,
+  gateway: providedGateway
+}: AssessmentClientProps) {
   const gateway = useMemo(
-    () => createBrowserAssessmentGateway(deploymentMode),
-    [deploymentMode]
+    () => providedGateway ?? createBrowserAssessmentGateway(deploymentMode),
+    [deploymentMode, providedGateway]
   );
   const [phase, setPhase] = useState<Phase>("intake");
   const [videoQueue, setVideoQueue] = useState<BrowserVideoQueueItem[]>([]);
@@ -412,6 +417,28 @@ export default function AssessmentClient({
             </button>
           </form>
 
+          <aside className="protocol-panel" aria-label="Assessment setup">
+            <div className="metric-row">
+              <span>Queue</span>
+              <strong>Eligible videos</strong>
+            </div>
+            <div className="metric-row">
+              <span>Mode</span>
+              <strong>Server controlled</strong>
+            </div>
+            <div className="metric-row">
+              <span>Source</span>
+              <strong>Private study videos</strong>
+            </div>
+            <div className="metric-row">
+              <span>Sessions</span>
+              <strong>1, 2, 3</strong>
+            </div>
+            <div className="metric-row">
+              <span>Responses</span>
+              <strong>Recorded securely</strong>
+            </div>
+          </aside>
         </section>
       )}
 
