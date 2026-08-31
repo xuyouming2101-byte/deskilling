@@ -4,8 +4,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   ClipboardList,
-  Database,
-  PlayCircle,
   RotateCcw
 } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
@@ -19,7 +17,8 @@ import type {
 import {
   buildVideoSubmission,
   createLesionDetectionClick,
-  getResponseActionState
+  getResponseActionState,
+  removeLesionDetectionClick
 } from "@/lib/lesionResponse";
 import {
   isStudySessionNumber,
@@ -217,7 +216,6 @@ export default function AssessmentClient() {
       !currentVideo ||
       !videoRef.current ||
       playbackStartedAtMs === null ||
-      videoEndedAtRef.current !== null ||
       finalizationGuardRef.current ||
       videoError
     ) {
@@ -239,6 +237,19 @@ export default function AssessmentClient() {
       video_id: currentVideo.videoId,
       ...click
     });
+  };
+
+  const handleDeleteMark = (clickIndex: number) => {
+    if (finalizationGuardRef.current) {
+      return;
+    }
+
+    const nextClicks = removeLesionDetectionClick(
+      detectionClicksRef.current,
+      clickIndex
+    );
+    detectionClicksRef.current = nextClicks;
+    setDetectionClicks(nextClicks);
   };
 
   const submitPendingSubmission = async (submission: VideoSubmission) => {
@@ -288,19 +299,19 @@ export default function AssessmentClient() {
       return;
     }
 
-    const submission = buildVideoSubmission(
-      {
-        participant_id: normalizedParticipantId,
-        session_number: parsedSessionNumber,
-        video_id: currentVideo.videoId,
-        video_order: currentVideo.videoOrder,
-        finalClassification,
-        clicks: detectionClicksRef.current,
-        nowMs: finalizedAtMs,
-        playbackStartedAtMs,
-        videoEndedAtMs
-      }
-    );
+    const clicksToSubmit =
+      finalClassification === "no" ? [] : detectionClicksRef.current;
+    const submission = buildVideoSubmission({
+      participant_id: normalizedParticipantId,
+      session_number: parsedSessionNumber,
+      video_id: currentVideo.videoId,
+      video_order: currentVideo.videoOrder,
+      finalClassification,
+      clicks: clicksToSubmit,
+      nowMs: finalizedAtMs,
+      playbackStartedAtMs,
+      videoEndedAtMs
+    });
     finalizationGuardRef.current = true;
     setFinalizationLocked(true);
     setFinalClassification(finalClassification);
@@ -359,14 +370,7 @@ export default function AssessmentClient() {
   return (
     <main className="assessment-shell">
       <section className="topbar" aria-label="Assessment status">
-        <div>
-          <p className="eyebrow">Supabase video queue</p>
-          <h1>Colonoscopy Lesion Check</h1>
-        </div>
-        <div className="status-pill">
-          <Database size={18} aria-hidden="true" />
-          <span>{configured ? "Supabase ready" : "Supabase not configured"}</span>
-        </div>
+        <h1>Colonoscopy Lesion Check</h1>
       </section>
 
       {phase === "intake" && (
@@ -434,11 +438,11 @@ export default function AssessmentClient() {
             </div>
             <div className="metric-row">
               <span>Mode</span>
-              <strong>{studyMode?.toUpperCase() ?? "SERVER CONTROLLED"}</strong>
+              <strong>Server controlled</strong>
             </div>
             <div className="metric-row">
               <span>Source</span>
-              <strong>Supabase</strong>
+              <strong>Private study videos</strong>
             </div>
             <div className="metric-row">
               <span>Sessions</span>
@@ -446,7 +450,7 @@ export default function AssessmentClient() {
             </div>
             <div className="metric-row">
               <span>Responses</span>
-              <strong>public.responses</strong>
+              <strong>Recorded securely</strong>
             </div>
           </aside>
         </section>
@@ -475,7 +479,7 @@ export default function AssessmentClient() {
               <span>
                 Video {currentIndex + 1} / {totalVideos}
               </span>
-              <span>{currentVideo.videoId}</span>
+              <span>{progressPercent}% complete</span>
             </div>
             <div className="progress-track">
               <div
@@ -494,14 +498,12 @@ export default function AssessmentClient() {
                 onEnded={handleVideoEnded}
                 onPlaybackStarted={handleVideoPlay}
                 onPlaybackStateChange={setVideoPlaying}
-                onVideoError={() =>
-                  setVideoError(`Cannot play signed URL for ${currentVideo.videoId}.`)
-                }
-                signedUrl={signedVideoUrl}
+                onVideoError={() => setVideoError("Cannot play the current video.")}
+                playbackUrl={signedVideoUrl}
                 videoId={currentVideo.videoId}
               />
               <div className="video-caption">
-                <span>{currentVideo.videoId}</span>
+                <span>Watch the video and record each lesion when detected.</span>
                 <span>
                   {videoEnded
                     ? "Playback complete"
@@ -509,17 +511,19 @@ export default function AssessmentClient() {
                       ? "Playing"
                       : videoStarted
                         ? "Paused"
-                        : "Private Supabase Storage"}
+                        : "Ready to play"}
                 </span>
               </div>
             </section>
 
             <aside className="response-panel" aria-label="Yes or No response">
               <div className="response-header">
-                <PlayCircle size={18} aria-hidden="true" />
                 <div>
                   <p className="eyebrow">Response</p>
                   <h2>Lesion detected?</h2>
+                  <p className="response-guidance">
+                    Mark each visible lesion when you first detect it.
+                  </p>
                 </div>
               </div>
 
@@ -531,24 +535,19 @@ export default function AssessmentClient() {
               )}
 
               {!videoStarted && !videoError && (
-                <div className="pending-state">
-                  <div className="pulse-dot" />
-                  <span>Start playback to enable lesion detection.</span>
-                </div>
+                <p className="playback-guidance">
+                  Start playback to enable lesion detection.
+                </p>
               )}
 
               {videoStarted && !videoEnded && !videoError && !finalizationLocked && (
-                <div className="pending-state">
-                  <div className="pulse-dot" />
-                  <span>Detection is active.</span>
-                </div>
+                <p className="playback-guidance">Detection is active.</p>
               )}
 
               {videoEnded && !finalizationLocked && !videoError && (
-                <div className="pending-state">
-                  <div className="pulse-dot" />
-                  <span>Choose the final classification.</span>
-                </div>
+                <p className="playback-guidance">
+                  Playback complete. Choose the final classification.
+                </p>
               )}
 
               <LesionSurvey
@@ -560,6 +559,7 @@ export default function AssessmentClient() {
                 canGoNext={actionState.canGoNext}
                 locked={finalizationLocked}
                 onDetect={handleDetect}
+                onDeleteMark={handleDeleteMark}
                 onFinalizeNo={(noClickedAtMs) => finalizeVideo("no", noClickedAtMs)}
                 onFinalizeYes={() => finalizeVideo("yes", performance.now())}
               />

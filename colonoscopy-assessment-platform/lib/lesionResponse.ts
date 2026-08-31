@@ -48,6 +48,18 @@ export function createLesionDetectionClick(
   };
 }
 
+export function removeLesionDetectionClick(
+  clicks: readonly LesionDetectionClick[],
+  clickIndex: number
+) {
+  return clicks
+    .filter((click) => click.click_index !== clickIndex)
+    .map((click, index) => ({
+      ...click,
+      click_index: index + 1
+    }));
+}
+
 export function getResponseActionState(args: ActionStateArgs) {
   if (!args.videoStarted || args.locked) {
     return {
@@ -58,7 +70,7 @@ export function getResponseActionState(args: ActionStateArgs) {
   }
 
   return {
-    canDetect: !args.videoEnded,
+    canDetect: true,
     canReportNoLesion: args.videoEnded,
     canGoNext: args.videoEnded && args.clickCount > 0
   };
@@ -78,8 +90,9 @@ export function buildVideoSubmission(
   }
 
   const isPositive = args.finalClassification === "yes";
+  const clicksToSubmit = isPositive ? args.clicks : [];
   const clicks = Object.freeze(
-    args.clicks.map((click) => Object.freeze({ ...click }))
+    clicksToSubmit.map((click) => Object.freeze({ ...click }))
   );
 
   return Object.freeze({
@@ -113,10 +126,12 @@ export function buildSubmissionRpcParams(
     p_no_response_latency_ms: submission.no_response_latency_ms,
     p_video_completed: submission.video_completed,
     p_access_code: accessCode,
-    p_clicks: submission.clicks.map((click) => ({
-      click_index: click.click_index,
-      video_time_at_click: click.video_time_at_click,
-      response_time_ms: click.response_time_ms
-    }))
+    p_clicks: submission.final_answer
+      ? submission.clicks.map((click) => ({
+          click_index: click.click_index,
+          video_time_at_click: click.video_time_at_click,
+          response_time_ms: click.response_time_ms
+        }))
+      : []
   };
 }

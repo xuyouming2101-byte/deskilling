@@ -87,11 +87,13 @@ function assertLexicalOrder(body, statements) {
   }
 }
 
-test("integrates the seek-free player and atomic submission client", () => {
+test("integrates the interactive player and atomic submission client", () => {
   assert.match(assessmentClientSource, /import AssessmentVideoPlayer/);
   assert.match(assessmentClientSource, /<AssessmentVideoPlayer/);
   assert.match(assessmentClientSource, /submitVideoResponse/);
   assert.doesNotMatch(assessmentClientSource, /<video\b/);
+  assert.match(assessmentClientSource, /playbackUrl=\{signedVideoUrl\}/);
+  assert.match(assessmentClientSource, /onDeleteMark=\{handleDeleteMark\}/);
 });
 
 test("uses the safe queue RPC with a coordinator-issued access code", () => {

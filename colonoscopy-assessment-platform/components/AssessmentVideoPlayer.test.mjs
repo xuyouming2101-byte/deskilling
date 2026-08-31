@@ -34,25 +34,27 @@ function assertLexicalOrder(body, statements) {
 test("captures the ended timestamp before mutating state or notifying parents", () => {
   assertLexicalOrder(getHandleEndedBody(), [
     "const endedAtMs = performance.now();",
+    "const shouldNotifyParent = !endedRef.current;",
     "endedRef.current = true;",
     "setIsPlaying(false);",
-    "setVideoEnded(true);",
     "onPlaybackStateChange(false);",
     "onEnded(endedAtMs);"
   ]);
 });
 
-test("keeps the player seek-free and bound to real media events", () => {
+test("keeps the full timeline interactive from the start", () => {
   const videoTag = source.match(/<video\b[\s\S]*?\/>/)?.[0];
 
   assert.ok(videoTag, "Expected a video JSX element.");
   assert.doesNotMatch(videoTag, /\bcontrols(?:\s|=|\/?>)/);
-  assert.doesNotMatch(source, /\bcurrentTime\s*=/);
-  assert.doesNotMatch(source, /\bfastSeek\s*\(/);
-  assert.doesNotMatch(source, /<input\b[^>]*\btype\s*=\s*["']range["']/);
-  assert.doesNotMatch(source, /\breplay\b/i);
+  assert.match(source, /<input\b[\s\S]*?type=\"range\"/);
+  assert.match(source, /video\.currentTime\s*=\s*Math\.min\(Math\.max\(0/);
+  assert.match(source, /aria-label=\"Replay video\"/);
+  assert.match(source, /step=\{0\.001\}/);
+  assert.doesNotMatch(source, /maxWatchedTimeRef|handleSeeking|onSeeking/);
   assert.doesNotMatch(source, /fullscreen|requestFullscreen|Maximize2/i);
   assert.match(source, /\bforwardRef\s*</);
   assert.match(videoTag, /onPlay=\{handlePlay\}/);
   assert.match(videoTag, /onEnded=\{handleEnded\}/);
+  assert.match(videoTag, /onLoadedMetadata=\{syncPosition\}/);
 });

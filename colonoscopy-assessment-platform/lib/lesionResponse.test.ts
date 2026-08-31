@@ -41,7 +41,7 @@ test("records repeated clicks with independent media and performance timing", ()
   ]);
 });
 
-test("enables final actions only after the video ends", () => {
+test("keeps lesion detection available during replay after the video ends", () => {
   assert.deepEqual(
     getResponseActionState({
       videoStarted: true,
@@ -58,7 +58,7 @@ test("enables final actions only after the video ends", () => {
       clickCount: 2,
       locked: false
     }),
-    { canDetect: false, canReportNoLesion: true, canGoNext: true }
+    { canDetect: true, canReportNoLesion: true, canGoNext: true }
   );
   assert.deepEqual(
     getResponseActionState({
@@ -67,7 +67,7 @@ test("enables final actions only after the video ends", () => {
       clickCount: 0,
       locked: false
     }),
-    { canDetect: false, canReportNoLesion: true, canGoNext: false }
+    { canDetect: true, canReportNoLesion: true, canGoNext: false }
   );
 });
 
@@ -122,7 +122,7 @@ test("positive summary uses the first valid lesion click", () => {
   assert.equal(submission.clicks.length, 2);
 });
 
-test("negative summary has no detection time and preserves overridden raw clicks", () => {
+test("negative summary has no detection time and excludes overridden clicks", () => {
   const rawClick = {
     click_index: 1,
     video_time_at_click: 2.125,
@@ -140,7 +140,7 @@ test("negative summary has no detection time and preserves overridden raw clicks
   assert.equal(submission.final_answer, false);
   assert.equal(submission.response_time_ms, 8_125);
   assert.equal(submission.no_response_latency_ms, 1_125);
-  assert.deepEqual(submission.clicks, [rawClick]);
+  assert.deepEqual(submission.clicks, []);
 });
 
 test("builds a deeply immutable pending submission snapshot", () => {
@@ -153,7 +153,7 @@ test("builds a deeply immutable pending submission snapshot", () => {
   ];
   const submission = buildVideoSubmission({
     ...identity,
-    finalClassification: "no",
+    finalClassification: "yes",
     clicks: rawClicks,
     nowMs: 9_125,
     playbackStartedAtMs: 1_000,
@@ -209,13 +209,7 @@ test("maps a final submission and access code to the exact RPC parameter contrac
     p_no_response_latency_ms: 1_125,
     p_video_completed: true,
     p_access_code: "coordinator-access-code-that-is-long-enough",
-    p_clicks: [
-      {
-        click_index: 1,
-        video_time_at_click: 2.125,
-        response_time_ms: 4_100
-      }
-    ]
+    p_clicks: []
   });
 });
 
