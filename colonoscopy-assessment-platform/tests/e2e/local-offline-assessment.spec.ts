@@ -366,41 +366,46 @@ test("completes and recovers a 40-video FORMAL attempt fully offline", async ({ 
     expect(rangeResult.headStatus).toBe(200);
     expect(rangeResult.unsatisfiedStatus).toBe(416);
 
+    const timeline = page.getByLabel("Seek video");
+    await expect(timeline).toBeEnabled();
+    const videoDuration = Number(await timeline.getAttribute("max"));
+    expect(videoDuration).toBeGreaterThan(0);
+
+    const seekTo = async (fraction: number) => {
+      const target = videoDuration * fraction;
+      await timeline.evaluate((input, nextTime) => {
+        const range = input as HTMLInputElement;
+        range.value = String(nextTime);
+        range.dispatchEvent(new Event("input", { bubbles: true }));
+      }, target);
+      await expect.poll(() => page.locator("video").evaluate(
+        (video) => (video as HTMLVideoElement).currentTime
+      )).toBeCloseTo(target, 1);
+    };
+
+    await seekTo(0.75);
+    await seekTo(0.2);
+    await seekTo(0.6);
+
     await page.getByRole("button", { name: "Play video", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Lesion detected" })).toBeEnabled();
-    await page.getByRole("button", { name: "Lesion detected" }).click();
-    await page.getByRole("button", { name: "Lesion detected" }).click();
+    await expect(page.getByRole("button", { name: "Lesion detected", exact: true })).toBeEnabled();
+    await page.getByRole("button", { name: "Lesion detected", exact: true }).click();
+    await page.getByRole("button", { name: "Lesion detected", exact: true }).click();
     await expect(page.getByText("Mark 2", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Delete mark 1" }).click();
     await expect(page.getByText("Mark 1", { exact: true })).toHaveCount(1);
     await expect(page.getByText("Mark 2", { exact: true })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Pause video" }).click();
-    const firstPassPosition = await page.locator("video").evaluate((video) => ({
-      currentTime: (video as HTMLVideoElement).currentTime,
-      duration: (video as HTMLVideoElement).duration
-    }));
-    await page.getByLabel("Seek video").evaluate((input) => {
-      const range = input as HTMLInputElement;
-      range.value = range.max;
-      range.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await expect.poll(() => page.locator("video").evaluate((video) => (video as HTMLVideoElement).currentTime)).toBeLessThan(firstPassPosition.duration - 0.1);
-    await page.getByLabel("Seek video").evaluate((input) => {
-      const range = input as HTMLInputElement;
-      range.value = "0";
-      range.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await expect.poll(() => page.locator("video").evaluate((video) => (video as HTMLVideoElement).currentTime)).toBeLessThanOrEqual(0.05);
-    await page.getByRole("button", { name: "Play video", exact: true }).click();
     await expect(page.getByRole("button", { name: "No lesion detected" })).toBeEnabled();
-    await page.getByLabel("Seek video").evaluate((input) => {
+    await timeline.evaluate((input) => {
       const range = input as HTMLInputElement;
       range.value = "0.2";
       range.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await expect.poll(() => page.locator("video").evaluate((video) => (video as HTMLVideoElement).currentTime)).toBeGreaterThan(0.15);
     await page.getByRole("button", { name: "Replay video" }).click();
+    await page.getByRole("button", { name: "Lesion detected", exact: true }).click();
+    await expect(page.getByText("Mark 2", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "No lesion detected" })).toBeEnabled();
     await page.getByRole("button", { name: "Next video" }).click();
     await expect(page.getByText("Video 2 / 40", { exact: true })).toBeVisible();
@@ -416,7 +421,7 @@ test("completes and recovers a 40-video FORMAL attempt fully offline", async ({ 
 
     await setPlaybackRate(page);
     await page.getByRole("button", { name: "Play video", exact: true }).click();
-    await page.getByRole("button", { name: "Lesion detected" }).click();
+    await page.getByRole("button", { name: "Lesion detected", exact: true }).click();
     await expect(page.getByRole("button", { name: "No lesion detected" })).toBeEnabled();
     await page.getByRole("button", { name: "No lesion detected" }).click();
     await expect(page.getByText("Video 3 / 40", { exact: true })).toBeVisible();
@@ -470,7 +475,7 @@ test("completes and recovers a 40-video FORMAL attempt fully offline", async ({ 
          (SELECT COUNT(*) FROM local_responses) AS responses,
          (SELECT COUNT(*) FROM local_lesion_detection_events) AS events`
     ).get() as { attempts: number; queue_rows: number; responses: number; events: number };
-    expect(counts).toEqual({ attempts: 1, queue_rows: 40, responses: 40, events: 1 });
+    expect(counts).toEqual({ attempts: 1, queue_rows: 40, responses: 40, events: 2 });
     const firstResponse = db.prepare(
       `SELECT answer, video_time_at_click_ms, detection_latency_ms,
               no_response_latency_ms, response_time_ms
@@ -481,6 +486,11 @@ test("completes and recovers a 40-video FORMAL attempt fully offline", async ({ 
     expect(firstResponse.detection_latency_ms).toBeLessThan(0);
     expect(firstResponse.no_response_latency_ms).toBeNull();
     expect(firstResponse.response_time_ms).toBeGreaterThanOrEqual(0);
+    const firstResponseEvents = db.prepare(
+      `SELECT click_index FROM local_lesion_detection_events
+       WHERE video_order = 1 ORDER BY click_index`
+    ).all() as Array<{ click_index: number }>;
+    expect(firstResponseEvents).toEqual([{ click_index: 1 }, { click_index: 2 }]);
     const noResponsesWithDetectionTimes = (db.prepare(
       `SELECT COUNT(*) AS count FROM local_responses
        WHERE answer = 0 AND (video_time_at_click_ms IS NOT NULL OR detection_latency_ms IS NOT NULL)`

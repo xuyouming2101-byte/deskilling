@@ -129,6 +129,18 @@ async function renderAssessment(
   await page.getByRole("button", { name: "Start", exact: true }).click();
   await expect(page.getByText("Video 1 / 3", { exact: true })).toBeVisible();
   await expect(page.getByText("Ready to play", { exact: true })).toBeVisible();
+  await expect(page.getByText("33% complete", { exact: true })).toBeVisible();
+
+  for (const technicalText of [
+    "Supabase",
+    "SQLite",
+    "Storage",
+    "video_fixture_001",
+    "ui-parity-attempt",
+    "Developer diagnostics"
+  ]) {
+    await expect(page.getByText(technicalText, { exact: false })).toHaveCount(0);
+  }
 
   const shell = page.locator(".assessment-shell");
   const structure = await shell.evaluate((element) => ({

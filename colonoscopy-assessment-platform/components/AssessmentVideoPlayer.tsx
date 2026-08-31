@@ -74,7 +74,6 @@ const AssessmentVideoPlayer = forwardRef<
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const playbackStartedRef = useRef(false);
   const endedRef = useRef(false);
-  const maxWatchedTimeRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState<PlaybackPosition>(initialPosition);
 
@@ -102,7 +101,6 @@ const AssessmentVideoPlayer = forwardRef<
   useEffect(() => {
     playbackStartedRef.current = false;
     endedRef.current = false;
-    maxWatchedTimeRef.current = 0;
     setIsPlaying(false);
     setPosition(initialPosition);
   }, [videoId, playbackUrl]);
@@ -133,7 +131,6 @@ const AssessmentVideoPlayer = forwardRef<
 
     if (shouldNotifyParent) {
       endedRef.current = true;
-      maxWatchedTimeRef.current = videoRef.current?.duration ?? 0;
     }
 
     setIsPlaying(false);
@@ -145,30 +142,6 @@ const AssessmentVideoPlayer = forwardRef<
   };
 
   const handleTimeUpdate = () => {
-    const video = videoRef.current;
-
-    if (video && !endedRef.current && !video.seeking) {
-      maxWatchedTimeRef.current = Math.max(
-        maxWatchedTimeRef.current,
-        video.currentTime
-      );
-    }
-
-    syncPosition();
-  };
-
-  const handleSeeking = () => {
-    const video = videoRef.current;
-
-    if (
-      !video ||
-      endedRef.current ||
-      video.currentTime <= maxWatchedTimeRef.current
-    ) {
-      return;
-    }
-
-    video.currentTime = maxWatchedTimeRef.current;
     syncPosition();
   };
 
@@ -230,10 +203,7 @@ const AssessmentVideoPlayer = forwardRef<
     const duration = Number.isFinite(video.duration)
       ? video.duration
       : nextTime;
-    const seekLimit = endedRef.current
-      ? duration
-      : maxWatchedTimeRef.current;
-    video.currentTime = Math.min(Math.max(0, nextTime), seekLimit);
+    video.currentTime = Math.min(Math.max(0, nextTime), duration);
     syncPosition();
   };
 
@@ -247,12 +217,12 @@ const AssessmentVideoPlayer = forwardRef<
   return (
     <section
       className="assessment-video-player"
-      aria-label={`Colonoscopy video ${videoId}`}
+      aria-label="Colonoscopy assessment video"
     >
       <video
         key={videoId}
         ref={setVideoRef}
-        aria-label={`Video ${videoId}`}
+        aria-label="Assessment video"
         disablePictureInPicture
         onDurationChange={syncPosition}
         onEnded={handleEnded}
@@ -260,7 +230,6 @@ const AssessmentVideoPlayer = forwardRef<
         onLoadedMetadata={syncPosition}
         onPause={handlePause}
         onPlay={handlePlay}
-        onSeeking={handleSeeking}
         onTimeUpdate={handleTimeUpdate}
         playsInline
         preload="metadata"

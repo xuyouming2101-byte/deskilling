@@ -41,19 +41,18 @@ test("captures the ended timestamp before mutating state or notifying parents", 
   ]);
 });
 
-test("limits first-pass seeking to watched content and unlocks after real ended", () => {
+test("keeps the full timeline unlocked as soon as metadata is available", () => {
   const videoTag = source.match(/<video\b[\s\S]*?\/>/)?.[0];
 
   assert.ok(videoTag, "Expected a video JSX element.");
   assert.doesNotMatch(videoTag, /\bcontrols(?:\s|=|\/?>)/);
-  assert.match(source, /maxWatchedTimeRef/);
-  assert.match(source, /endedRef\.current\s*\?/);
+  assert.doesNotMatch(source, /maxWatchedTimeRef/);
+  assert.doesNotMatch(source, /const handleSeeking/);
+  assert.doesNotMatch(videoTag, /onSeeking=/);
   assert.match(
     source,
-    /const seekLimit = endedRef\.current[\s\S]*maxWatchedTimeRef\.current;[\s\S]*Math\.min\(Math\.max\(0, nextTime\), seekLimit\)/
+    /video\.currentTime = Math\.min\(Math\.max\(0, nextTime\), duration\)/
   );
-  assert.match(source, /const handleSeeking/);
-  assert.match(videoTag, /onSeeking=\{handleSeeking\}/);
   assert.match(source, /\bcurrentTime\s*=/);
   assert.doesNotMatch(source, /\bfastSeek\s*\(/);
   assert.match(source, /<input\b[\s\S]*?\btype\s*=\s*["']range["']/);

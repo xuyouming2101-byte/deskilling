@@ -97,7 +97,10 @@ test("integrates the player through a source-neutral assessment gateway", () => 
   assert.match(assessmentClientSource, /<AssessmentVideoPlayer/);
   assert.match(assessmentClientSource, /createBrowserAssessmentGateway/);
   assert.match(assessmentClientSource, /gateway\.submitResponse/);
-  assert.match(pageSource, /<AssessmentClient deploymentMode=\{deploymentMode\}/);
+  assert.match(
+    pageSource,
+    /<AssessmentClient[\s\S]*deploymentMode=\{deploymentMode\}/
+  );
   assert.doesNotMatch(assessmentClientSource, /<video\b/);
 });
 
@@ -125,7 +128,11 @@ test("keeps the golden two-column intake shell without source-specific wording",
   );
   assert.match(
     globalStylesSource,
-    /\.intake-grid,\s*\.assessment-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 360px;/s
+    /\.intake-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 360px;/s
+  );
+  assert.match(
+    globalStylesSource,
+    /\.assessment-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 800px\) 350px;/s
   );
   assert.match(
     globalStylesSource,

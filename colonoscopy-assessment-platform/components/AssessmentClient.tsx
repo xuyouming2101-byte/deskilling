@@ -4,11 +4,12 @@ import {
   AlertTriangle,
   CheckCircle2,
   ClipboardList,
-  Database,
-  PlayCircle,
   RotateCcw
 } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import AssessmentDevDiagnostics, {
+  AssessmentDevBadge
+} from "@/components/AssessmentDevDiagnostics";
 import AssessmentVideoPlayer from "@/components/AssessmentVideoPlayer";
 import LesionSurvey from "@/components/LesionSurvey";
 import type {
@@ -43,11 +44,13 @@ type CompletedSession = {
 
 type AssessmentClientProps = {
   deploymentMode: "local" | "online";
+  devDiagnosticsEnabled?: boolean;
   gateway?: BrowserAssessmentGateway;
 };
 
 export default function AssessmentClient({
   deploymentMode,
+  devDiagnosticsEnabled = false,
   gateway: providedGateway
 }: AssessmentClientProps) {
   const gateway = useMemo(
@@ -358,16 +361,13 @@ export default function AssessmentClient({
     totalVideos > 0 ? Math.round(((currentIndex + 1) / totalVideos) * 100) : 0;
 
   return (
-    <main className="assessment-shell">
+    <main
+      className="assessment-shell"
+      data-dev-diagnostics={devDiagnosticsEnabled ? "true" : "false"}
+    >
       <section className="topbar" aria-label="Assessment status">
-        <div>
-          <p className="eyebrow">Video assessment</p>
-          <h1>Colonoscopy Lesion Check</h1>
-        </div>
-        <div className="status-pill">
-          <Database size={18} aria-hidden="true" />
-          <span>{configured ? "Assessment ready" : "Configuration error"}</span>
-        </div>
+        <h1>Colonoscopy Lesion Check</h1>
+        {devDiagnosticsEnabled && <AssessmentDevBadge />}
       </section>
 
       {phase === "intake" && (
@@ -465,7 +465,7 @@ export default function AssessmentClient({
               <span>
                 Video {currentIndex + 1} / {totalVideos}
               </span>
-              <span>{currentVideo.videoId}</span>
+              <span>{progressPercent}% complete</span>
             </div>
             <div className="progress-track">
               <div
@@ -485,13 +485,13 @@ export default function AssessmentClient({
                 onPlaybackStarted={handleVideoPlay}
                 onPlaybackStateChange={setVideoPlaying}
                 onVideoError={() =>
-                  setVideoError(`Cannot play video ${currentVideo.videoId}.`)
+                  setVideoError("Cannot play the current video.")
                 }
                 playbackUrl={playbackUrl}
                 videoId={currentVideo.videoId}
               />
               <div className="video-caption">
-                <span>{currentVideo.videoId}</span>
+                <span>Watch the video and record each lesion when detected.</span>
                 <span>
                   {videoEnded
                     ? "Playback complete"
@@ -506,10 +506,12 @@ export default function AssessmentClient({
 
             <aside className="response-panel" aria-label="Yes or No response">
               <div className="response-header">
-                <PlayCircle size={18} aria-hidden="true" />
                 <div>
                   <p className="eyebrow">Response</p>
                   <h2>Lesion detected?</h2>
+                  <p className="response-guidance">
+                    Mark each visible lesion when you first detect it.
+                  </p>
                 </div>
               </div>
 
@@ -521,24 +523,19 @@ export default function AssessmentClient({
               )}
 
               {!videoStarted && !videoError && (
-                <div className="pending-state">
-                  <div className="pulse-dot" />
-                  <span>Start playback to enable lesion detection.</span>
-                </div>
+                <p className="playback-guidance">
+                  Start playback to enable lesion detection.
+                </p>
               )}
 
               {videoStarted && !videoEnded && !videoError && !finalizationLocked && (
-                <div className="pending-state">
-                  <div className="pulse-dot" />
-                  <span>Detection is active.</span>
-                </div>
+                <p className="playback-guidance">Detection is active.</p>
               )}
 
               {videoEnded && !finalizationLocked && !videoError && (
-                <div className="pending-state">
-                  <div className="pulse-dot" />
-                  <span>Choose the final classification.</span>
-                </div>
+                <p className="playback-guidance">
+                  Playback complete. Choose the final classification.
+                </p>
               )}
 
               <LesionSurvey
@@ -596,6 +593,15 @@ export default function AssessmentClient({
               </div>
             </aside>
           </div>
+
+          {devDiagnosticsEnabled && (
+            <AssessmentDevDiagnostics
+              attemptId={currentAttemptId}
+              currentVideoId={currentVideo.videoId}
+              queueLength={totalVideos}
+              source={deploymentMode}
+            />
+          )}
         </section>
       )}
 

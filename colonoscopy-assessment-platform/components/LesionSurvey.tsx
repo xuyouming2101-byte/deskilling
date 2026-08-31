@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Ban, ScanSearch, Trash2 } from "lucide-react";
+import { ArrowRight, Ban, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo } from "react";
 import { Model } from "survey-core";
 import type {
@@ -114,10 +114,9 @@ export default function LesionSurvey({
           onClick={onDetect}
           type="button"
         >
-          <ScanSearch aria-hidden="true" />
+          <Plus aria-hidden="true" />
           <span>Lesion detected</span>
         </button>
-        <p>Repeat for each visible lesion.</p>
       </div>
 
       <div className="detection-audit" aria-live="polite">
@@ -144,6 +143,7 @@ export default function LesionSurvey({
                   type="button"
                 >
                   <Trash2 aria-hidden="true" />
+                  <span>Delete</span>
                 </button>
               </li>
             ))
@@ -152,9 +152,8 @@ export default function LesionSurvey({
       </div>
 
       <div
-        aria-hidden={!showFinalActions}
         className="final-actions"
-        data-visible={showFinalActions}
+        data-has-next={canGoNext || (locked && clickCount > 0)}
       >
         <button
           className="no-lesion-button"
@@ -165,15 +164,17 @@ export default function LesionSurvey({
           <Ban aria-hidden="true" />
           <span>No lesion detected</span>
         </button>
-        <button
-          className="next-video-button"
-          disabled={!canGoNext || locked}
-          onClick={handleFinalizeYes}
-          type="button"
-        >
-          <span>Next video</span>
-          <ArrowRight aria-hidden="true" />
-        </button>
+        {(canGoNext || (locked && clickCount > 0)) && (
+          <button
+            className="next-video-button"
+            disabled={!canGoNext || locked}
+            onClick={handleFinalizeYes}
+            type="button"
+          >
+            <span>Next video</span>
+            <ArrowRight aria-hidden="true" />
+          </button>
+        )}
       </div>
     </div>
   );
