@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -162,6 +162,72 @@ test("streams an exact byte range with 206", async () => {
       fixtureBytes.subarray(4, 12)
     );
   } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("cancels an active Range stream cleanly, closes its file, and serves the replacement stream", async () => {
+  const fixture = await createRouteFixture();
+  const activeBytes = Buffer.alloc(8 * 1024 * 1024, 0x5a);
+  await writeFile(path.join(fixture.root, "video_002.mp4"), activeBytes);
+  let closeCalls = 0;
+  const uncaught: Error[] = [];
+  const monitor = (error: Error) => uncaught.push(error);
+
+  process.on("uncaughtExceptionMonitor", monitor);
+
+  try {
+    const handlers = createLocalVideoRouteHandlers({
+      authorizationRepository: fixture.authorizationRepository,
+      readMode: () => "local",
+      readVideoRoot: () => fixture.root,
+      async openFile(filePath) {
+        const fileHandle = await open(filePath, "r");
+        const close = fileHandle.close.bind(fileHandle);
+        fileHandle.close = async () => {
+          closeCalls += 1;
+          await close();
+        };
+        return fileHandle;
+      }
+    });
+    const abortController = new AbortController();
+    const active = await handlers.GET(
+      new Request("http://localhost/api/local/video", {
+        headers: { Range: `bytes=0-${activeBytes.length - 1}` },
+        signal: abortController.signal
+      }),
+      routeContext("attempt-open", "2")
+    );
+    const reader = active.body!.getReader();
+    const first = await reader.read();
+
+    assert.equal(first.done, false);
+    assert.ok((first.value?.byteLength ?? 0) > 0);
+
+    const cancellation = reader.cancel("video source replaced");
+    abortController.abort();
+    await cancellation;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.equal(closeCalls, 1);
+    assert.deepEqual(uncaught, []);
+
+    const replacement = await handlers.GET(
+      new Request("http://localhost/api/local/video", {
+        headers: { Range: "bytes=0-7" }
+      }),
+      routeContext("attempt-open", "2")
+    );
+
+    assert.equal(replacement.status, 206);
+    assert.deepEqual(
+      Buffer.from(await replacement.arrayBuffer()),
+      activeBytes.subarray(0, 8)
+    );
+    assert.equal(closeCalls, 2);
+  } finally {
+    process.off("uncaughtExceptionMonitor", monitor);
     await fixture.cleanup();
   }
 });

@@ -1,8 +1,6 @@
 import "server-only";
 
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
-import { Readable } from "node:stream";
+import { open, stat } from "node:fs/promises";
 import type { CurrentVideoAuthorizationRepository } from "../../../../../../../lib/assessment/contracts.ts";
 import { withLocalAssessmentRepository } from "../../../../../../../lib/local/localRuntime.ts";
 import type { DeploymentMode } from "../../../../../../../lib/runtime/deploymentMode.ts";
@@ -34,6 +32,7 @@ type RouteHandler = (
 
 type LocalVideoRouteDependencies = {
   authorizationRepository: CurrentVideoAuthorizationRepository;
+  openFile?: typeof open;
   readMode?: () => DeploymentMode;
   readVideoRoot?: () => string;
   resolveVideoPath?: typeof resolveAuthorizedMp4;
@@ -95,16 +94,97 @@ function createRangeErrorResponse(size: number): Response {
 }
 
 function streamFile(
-  request: Request,
+  openFile: typeof open,
   filePath: string,
   range: ByteRange | null,
+  size: number,
   headers: Headers
 ): Response {
-  const stream = createReadStream(filePath, range ?? undefined);
-  request.signal.addEventListener("abort", () => stream.destroy(), {
-    once: true
+  const firstByte = range?.start ?? 0;
+  const finalByte = range?.end ?? size - 1;
+  const fileHandlePromise = openFile(filePath, "r");
+  let position = firstByte;
+  let cancelled = false;
+  let closed = false;
+
+  async function closeOnce(): Promise<void> {
+    if (closed) {
+      return;
+    }
+
+    closed = true;
+
+    try {
+      const fileHandle = await fileHandlePromise;
+      await fileHandle.close();
+    } catch {
+      // A failed open or cancelled read has no remaining handle to close.
+    }
+  }
+
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (cancelled) {
+        return;
+      }
+
+      const remaining = finalByte - position + 1;
+
+      if (remaining <= 0) {
+        await closeOnce();
+        if (!cancelled) {
+          controller.close();
+        }
+        return;
+      }
+
+      const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, remaining));
+
+      try {
+        const fileHandle = await fileHandlePromise;
+        const { bytesRead } = await fileHandle.read(
+          buffer,
+          0,
+          buffer.length,
+          position
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        if (bytesRead === 0) {
+          await closeOnce();
+          if (!cancelled) {
+            controller.close();
+          }
+          return;
+        }
+
+        position += bytesRead;
+        controller.enqueue(
+          new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead)
+        );
+
+        if (position > finalByte) {
+          await closeOnce();
+          if (!cancelled) {
+            controller.close();
+          }
+        }
+      } catch (error) {
+        await closeOnce();
+        if (!cancelled) {
+          controller.error(error);
+        }
+      }
+    },
+
+    async cancel() {
+      cancelled = true;
+      await closeOnce();
+    }
   });
-  const body = Readable.toWeb(stream) as unknown as BodyInit;
 
   return new Response(body, {
     status: range ? 206 : 200,
@@ -120,6 +200,7 @@ export function createLocalVideoRouteHandlers(
     dependencies.readVideoRoot ?? readConfiguredVideoRoot;
   const resolveVideoPath =
     dependencies.resolveVideoPath ?? resolveAuthorizedMp4;
+  const openFile = dependencies.openFile ?? open;
 
   async function handle(
     request: Request,
@@ -236,7 +317,7 @@ export function createLocalVideoRouteHandlers(
       });
     }
 
-    return streamFile(request, filePath, range, headers);
+    return streamFile(openFile, filePath, range, size, headers);
   }
 
   return {
