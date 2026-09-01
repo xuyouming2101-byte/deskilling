@@ -151,6 +151,13 @@ h2 {
   box-shadow: 0 8px 22px rgba(21, 24, 23, 0.06);
 }
 
+.online-password-error {
+  margin: 0;
+  color: #8d201a;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
 .intake-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;

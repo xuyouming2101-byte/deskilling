@@ -109,10 +109,14 @@ test("uses the current access-code-free queue and response RPCs", () => {
   assert.doesNotMatch(supabaseClientSource, staleStudyModePattern);
 });
 
-test("keeps participant intake free of credentials", () => {
+test("keeps participant intake free of legacy access codes", () => {
   assert.doesNotMatch(sessionConfigSource, /localStorage|sessionStorage|getRandomValues/);
   assert.doesNotMatch(assessmentClientSource, /localStorage|sessionStorage|getRandomValues/);
-  assert.doesNotMatch(componentAndLibSource, /password|access.?code/i);
+  assert.doesNotMatch(componentAndLibSource, /access.?code/i);
+  assert.match(
+    assessmentClientSource,
+    /requiresOnlinePassword[\s\S]*type="password"/
+  );
   assert.doesNotMatch(edgeFunctionSource, /console\.(?:log|warn|error)/);
 });
 

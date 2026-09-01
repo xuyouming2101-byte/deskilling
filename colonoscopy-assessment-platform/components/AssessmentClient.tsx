@@ -41,13 +41,23 @@ type CompletedSession = {
   totalVideos: number;
 };
 
-export default function AssessmentClient() {
+type AssessmentClientProps = {
+  requiresOnlinePassword?: boolean;
+};
+
+export default function AssessmentClient({
+  requiresOnlinePassword = false
+}: AssessmentClientProps) {
   const [phase, setPhase] = useState<Phase>("intake");
   const [videoQueue, setVideoQueue] = useState<VideoQueueItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [signedVideoUrl, setSignedVideoUrl] = useState("");
   const [participantId, setParticipantId] = useState("");
   const [sessionNumber, setSessionNumber] = useState("1");
+  const [onlinePassword, setOnlinePassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordVerificationInFlight, setPasswordVerificationInFlight] =
+    useState(false);
   const [intakeError, setIntakeError] = useState("");
   const [videoStarted, setVideoStarted] = useState(false);
   const [videoEnded, setVideoEnded] = useState(false);
@@ -130,8 +140,9 @@ export default function AssessmentClient() {
     setPhase(session.isComplete ? "complete" : "assessment");
   };
 
-  const startAssessment = (event: FormEvent<HTMLFormElement>) => {
+  const startAssessment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setPasswordError("");
 
     if (!normalizedParticipantId) {
       setIntakeError("Participant ID is required.");
@@ -147,6 +158,34 @@ export default function AssessmentClient() {
     }
 
     setIntakeError("");
+
+    if (requiresOnlinePassword) {
+      setPasswordVerificationInFlight(true);
+
+      try {
+        const response = await fetch("/api/online-password", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: onlinePassword })
+        });
+        const result = (await response.json().catch(() => ({}))) as {
+          authorized?: boolean;
+          error?: string;
+        };
+
+        if (!response.ok || result.authorized !== true) {
+          setPasswordError(result.error ?? "Incorrect password.");
+          return;
+        }
+
+        setOnlinePassword("");
+      } catch {
+        setPasswordError("Unable to verify the password. Please try again.");
+        return;
+      } finally {
+        setPasswordVerificationInFlight(false);
+      }
+    }
 
     void loadQueue().catch((error) => {
       setIntakeError(
@@ -381,6 +420,25 @@ export default function AssessmentClient() {
               </select>
             </label>
 
+            {requiresOnlinePassword && (
+              <label className="field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  onChange={(event) => setOnlinePassword(event.target.value)}
+                  value={onlinePassword}
+                  required
+                />
+              </label>
+            )}
+
+            {passwordError && (
+              <p className="online-password-error" role="alert">
+                {passwordError}
+              </p>
+            )}
+
             {intakeError && (
               <div className="alert-box critical">
                 <AlertTriangle size={18} aria-hidden="true" />
@@ -388,8 +446,12 @@ export default function AssessmentClient() {
               </div>
             )}
 
-            <button className="primary-button" type="submit">
-              Start
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={passwordVerificationInFlight}
+            >
+              {passwordVerificationInFlight ? "Checking..." : "Start"}
             </button>
           </form>
 
