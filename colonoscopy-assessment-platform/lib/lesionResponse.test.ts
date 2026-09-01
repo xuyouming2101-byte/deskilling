@@ -183,7 +183,7 @@ test("rejects a positive final classification without lesion clicks", () => {
   );
 });
 
-test("maps a final submission and access code to the exact RPC parameter contract", () => {
+test("maps a final submission to the exact access-code-free RPC contract", () => {
   const params = buildSubmissionRpcParams({
     ...identity,
     final_answer: false,
@@ -197,7 +197,7 @@ test("maps a final submission and access code to the exact RPC parameter contrac
         response_time_ms: 4_100
       }
     ]
-  }, "coordinator-access-code-that-is-long-enough");
+  });
 
   assert.deepEqual(params, {
     p_participant_id: "P001",
@@ -208,12 +208,11 @@ test("maps a final submission and access code to the exact RPC parameter contrac
     p_response_time_ms: 8_125,
     p_no_response_latency_ms: 1_125,
     p_video_completed: true,
-    p_access_code: "coordinator-access-code-that-is-long-enough",
     p_clicks: []
   });
 });
 
-test("maps an identical submission and access code to identical retry parameters", () => {
+test("maps an identical submission to identical retry parameters", () => {
   const submission = buildVideoSubmission({
     ...identity,
     finalClassification: "no",
@@ -222,10 +221,8 @@ test("maps an identical submission and access code to identical retry parameters
     playbackStartedAtMs: 1_000,
     videoEndedAtMs: 8_000
   });
-  const accessCode = "one-fixed-coordinator-code-for-every-retry";
-
-  const firstAttempt = buildSubmissionRpcParams(submission, accessCode);
-  const retryAttempt = buildSubmissionRpcParams(submission, accessCode);
+  const firstAttempt = buildSubmissionRpcParams(submission);
+  const retryAttempt = buildSubmissionRpcParams(submission);
 
   assert.deepEqual(retryAttempt, firstAttempt);
   assert.deepEqual(retryAttempt, {
@@ -237,7 +234,6 @@ test("maps an identical submission and access code to identical retry parameters
     p_response_time_ms: 8_125,
     p_no_response_latency_ms: 1_125,
     p_video_completed: true,
-    p_access_code: "one-fixed-coordinator-code-for-every-retry",
     p_clicks: []
   });
 });

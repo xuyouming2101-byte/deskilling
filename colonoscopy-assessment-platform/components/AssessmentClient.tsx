@@ -22,9 +22,7 @@ import {
 } from "@/lib/lesionResponse";
 import {
   isStudySessionNumber,
-  STUDY_SESSION_NUMBERS,
-  validateAssessmentAccessCode,
-  type StudyMode
+  STUDY_SESSION_NUMBERS
 } from "@/lib/sessionConfig";
 import {
   isSupabaseConfigured,
@@ -50,7 +48,6 @@ export default function AssessmentClient() {
   const [signedVideoUrl, setSignedVideoUrl] = useState("");
   const [participantId, setParticipantId] = useState("");
   const [sessionNumber, setSessionNumber] = useState("1");
-  const [accessCode, setAccessCode] = useState("");
   const [intakeError, setIntakeError] = useState("");
   const [videoStarted, setVideoStarted] = useState(false);
   const [videoEnded, setVideoEnded] = useState(false);
@@ -69,7 +66,6 @@ export default function AssessmentClient() {
   const [finalizationLocked, setFinalizationLocked] = useState(false);
   const [completedSession, setCompletedSession] =
     useState<CompletedSession | null>(null);
-  const [studyMode, setStudyMode] = useState<StudyMode | null>(null);
 
   const configured = isSupabaseConfigured();
   const currentVideo = videoQueue[currentIndex] ?? null;
@@ -80,7 +76,6 @@ export default function AssessmentClient() {
   const submissionInFlightRef = useRef(false);
   const videoStartedAtRef = useRef<number | null>(null);
   const videoEndedAtRef = useRef<number | null>(null);
-  const accessCodeRef = useRef<string | null>(null);
   const normalizedParticipantId = participantId.trim();
   const parsedSessionNumber = Number.parseInt(sessionNumber, 10);
 
@@ -94,15 +89,14 @@ export default function AssessmentClient() {
     }
   }, [configured]);
 
-  const loadQueue = async (accessCode: string) => {
+  const loadQueue = async () => {
     setPhase("loading");
     setLoadError("");
     setCompletedSession(null);
 
     const session = await loadAssessmentSession(
       normalizedParticipantId,
-      parsedSessionNumber,
-      accessCode
+      parsedSessionNumber
     );
     let nextSignedVideoUrl = "";
 
@@ -116,8 +110,7 @@ export default function AssessmentClient() {
       const videoSource = await loadCurrentVideoSource(
         normalizedParticipantId,
         parsedSessionNumber,
-        nextVideo,
-        accessCode
+        nextVideo
       );
       nextSignedVideoUrl = videoSource.signedUrl;
     }
@@ -125,7 +118,6 @@ export default function AssessmentClient() {
     setVideoQueue(session.videoQueue);
     setCurrentIndex(session.startIndex);
     setSignedVideoUrl(nextSignedVideoUrl);
-    setStudyMode(session.studyMode);
     setCompletedSession(
       session.isComplete
         ? {
@@ -156,22 +148,12 @@ export default function AssessmentClient() {
 
     setIntakeError("");
 
-    try {
-      const normalizedAccessCode = validateAssessmentAccessCode(accessCode);
-      accessCodeRef.current = normalizedAccessCode;
-      void loadQueue(normalizedAccessCode).catch((error) => {
-        accessCodeRef.current = null;
-        setIntakeError(
-          error instanceof Error ? error.message : "Unable to load videos."
-        );
-        setPhase("intake");
-      });
-    } catch (error) {
-      accessCodeRef.current = null;
+    void loadQueue().catch((error) => {
       setIntakeError(
-        error instanceof Error ? error.message : "Study access code is invalid."
+        error instanceof Error ? error.message : "Unable to load videos."
       );
-    }
+      setPhase("intake");
+    });
   };
 
   useEffect(() => {
@@ -262,14 +244,8 @@ export default function AssessmentClient() {
     setSaveError("");
 
     try {
-      const accessCode = accessCodeRef.current;
-
-      if (!accessCode) {
-        throw new Error("Study access code is unavailable. Return to the start screen.");
-      }
-
-      await submitVideoResponse(submission, accessCode);
-      await loadQueue(accessCode);
+      await submitVideoResponse(submission);
+      await loadQueue();
       setSaveState("saved");
     } catch (error) {
       setPhase("assessment");
@@ -344,12 +320,9 @@ export default function AssessmentClient() {
     setVideoQueue([]);
     setCurrentIndex(0);
     setSignedVideoUrl("");
-    setStudyMode(null);
     setLoadError("");
     setIntakeError("");
     setCompletedSession(null);
-    setAccessCode("");
-    accessCodeRef.current = null;
 
     if (Number.isInteger(nextSessionNumber) && isStudySessionNumber(nextSessionNumber)) {
       setSessionNumber(String(nextSessionNumber));
@@ -406,17 +379,6 @@ export default function AssessmentClient() {
                   </option>
                 ))}
               </select>
-            </label>
-
-            <label className="field">
-              <span>Study access code</span>
-              <input
-                autoComplete="off"
-                onChange={(event) => setAccessCode(event.target.value)}
-                placeholder="Coordinator-issued code"
-                type="password"
-                value={accessCode}
-              />
             </label>
 
             {intakeError && (

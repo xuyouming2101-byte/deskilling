@@ -14,7 +14,6 @@ type RequestBody = {
   participant_id?: unknown;
   session_number?: unknown;
   video_order?: unknown;
-  access_code?: unknown;
 };
 
 function jsonResponse(body: object, status: number) {
@@ -38,8 +37,6 @@ Deno.serve(async (request: Request) => {
         : "";
     const sessionNumber = Number(body.session_number);
     const videoOrder = Number(body.video_order);
-    const accessCode =
-      typeof body.access_code === "string" ? body.access_code.trim() : "";
 
     if (
       participantId.length === 0 ||
@@ -47,8 +44,7 @@ Deno.serve(async (request: Request) => {
       sessionNumber < 1 ||
       sessionNumber > 3 ||
       !Number.isInteger(videoOrder) ||
-      videoOrder < 1 ||
-      accessCode.length < 20
+      videoOrder < 1
     ) {
       return jsonResponse({ error: "Video access denied." }, 403);
     }
@@ -69,8 +65,7 @@ Deno.serve(async (request: Request) => {
     const authorization = await serviceClient.rpc(AUTHORIZATION_FUNCTION, {
       p_participant_id: participantId,
       p_session_number: sessionNumber,
-      p_video_order: videoOrder,
-      p_access_code: accessCode
+      p_video_order: videoOrder
     });
     const rows = Array.isArray(authorization.data) ? authorization.data : [];
     const authorizedVideo = rows[0] as

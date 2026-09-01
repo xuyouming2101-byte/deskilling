@@ -153,13 +153,12 @@ function parseSafeQueueRows(rows: SafeQueueRow[]) {
 
 export async function loadAssessmentSession(
   participantId: string,
-  sessionNumber: number,
-  accessCode: string
+  sessionNumber: number
 ): Promise<AssessmentSession> {
   const supabase = requireSupabaseClient();
   const { data, error } = await supabase.rpc(
     START_OR_RESUME_FUNCTION,
-    buildStartOrResumeRpcParams(participantId, sessionNumber, accessCode)
+    buildStartOrResumeRpcParams(participantId, sessionNumber)
   );
 
   if (error) {
@@ -194,16 +193,14 @@ export async function loadAssessmentSession(
 export async function loadCurrentVideoSource(
   participantId: string,
   sessionNumber: number,
-  video: VideoQueueItem,
-  accessCode: string
+  video: VideoQueueItem
 ): Promise<VideoSource> {
   const supabase = requireSupabaseClient();
   const { data, error } = await supabase.functions.invoke(VIDEO_URL_FUNCTION, {
     body: {
       participant_id: participantId,
       session_number: sessionNumber,
-      video_order: video.videoOrder,
-      access_code: accessCode
+      video_order: video.videoOrder
     }
   });
 
@@ -234,13 +231,12 @@ export async function loadCurrentVideoSource(
 }
 
 export async function submitVideoResponse(
-  submission: VideoSubmission,
-  accessCode: string
+  submission: VideoSubmission
 ) {
   const supabase = requireSupabaseClient();
   const result = await supabase.rpc(
     SUBMIT_RESPONSE_FUNCTION,
-    buildSubmissionRpcParams(submission, accessCode)
+    buildSubmissionRpcParams(submission)
   );
 
   console.log("response insert result", {

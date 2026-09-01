@@ -96,14 +96,12 @@ test("integrates the interactive player and atomic submission client", () => {
   assert.match(assessmentClientSource, /onDeleteMark=\{handleDeleteMark\}/);
 });
 
-test("uses the safe queue RPC with a coordinator-issued access code", () => {
+test("uses the current access-code-free queue and response RPCs", () => {
   assert.match(supabaseClientSource, /start_or_resume_assessment/);
   assert.match(supabaseClientSource, /buildStartOrResumeRpcParams/);
-  assert.match(assessmentClientSource, /validateAssessmentAccessCode/);
-  assert.match(assessmentClientSource, /loadAssessmentSession\([\s\S]*accessCode/);
-  assert.match(assessmentClientSource, /submitVideoResponse\(submission, accessCode\)/);
-  assert.match(assessmentClientSource, /type="password"/);
-  assert.match(assessmentClientSource, />Study access code</);
+  assert.doesNotMatch(componentAndLibSource, /accessCode|Access code|access_code/);
+  assert.match(assessmentClientSource, /loadAssessmentSession\(\s*normalizedParticipantId,\s*parsedSessionNumber\s*\)/);
+  assert.match(assessmentClientSource, /submitVideoResponse\(submission\)/);
   assert.doesNotMatch(supabaseClientSource, /\.from\(["']videos["']\)/);
   assert.doesNotMatch(supabaseClientSource, /\.from\(["']assessment_queue["']\)/);
   assert.doesNotMatch(componentAndLibSource, /has_lesion|lesion_onset_sec|hasLesion|lesionOnsetSec|detection_latency_ms/);
@@ -111,27 +109,25 @@ test("uses the safe queue RPC with a coordinator-issued access code", () => {
   assert.doesNotMatch(supabaseClientSource, staleStudyModePattern);
 });
 
-test("keeps the access code in memory without browser persistence or secret logs", () => {
+test("keeps participant intake free of credentials", () => {
   assert.doesNotMatch(sessionConfigSource, /localStorage|sessionStorage|getRandomValues/);
   assert.doesNotMatch(assessmentClientSource, /localStorage|sessionStorage|getRandomValues/);
-  assert.doesNotMatch(componentAndLibSource, /console\.(?:log|warn|error)\([^)]*accessCode/s);
+  assert.doesNotMatch(componentAndLibSource, /password|access.?code/i);
   assert.doesNotMatch(edgeFunctionSource, /console\.(?:log|warn|error)/);
 });
 
-test("validates the coordinator access code before loading a queue", () => {
+test("starts from participant ID and session only", () => {
   const startBody = getFunctionBody(assessmentClientSource, "startAssessment");
 
-  assert.match(startBody, /try\s*\{/);
-  assert.match(startBody, /validateAssessmentAccessCode/);
-  assert.match(startBody, /catch(?:\s*\([^)]*\))?\s*\{/);
+  assert.doesNotMatch(startBody, /accessCode|validateAssessmentAccessCode/);
+  assert.match(startBody, /void loadQueue\(\)\.catch/);
   assert.match(startBody, /setIntakeError\(/);
 });
 
-test("keeps a rejected access-code start on the intake screen", () => {
+test("keeps a rejected Supabase start on the intake screen", () => {
   const startBody = getFunctionBody(assessmentClientSource, "startAssessment");
 
-  assert.match(startBody, /loadQueue\(normalizedAccessCode\)\.catch/);
-  assert.match(startBody, /accessCodeRef\.current = null;/);
+  assert.match(startBody, /loadQueue\(\)\.catch/);
   assert.match(startBody, /setIntakeError\(/);
   assert.match(startBody, /setPhase\("intake"\);/);
 });
@@ -208,21 +204,21 @@ test("signs only the current video through the service-role Edge Function", () =
   assert.doesNotMatch(edgeFunctionSource, /signed_url[^\n]*console|access_code[^\n]*console/i);
 });
 
-test("uses custom access-code authorization for the publishable-key Edge Function", () => {
+test("uses the current access-code-free authorization contract for the Edge Function", () => {
   assert.match(
     supabaseConfigSource,
     /\[functions\.issue-assessment-video-url\]\s*verify_jwt\s*=\s*false/s
   );
-  assert.match(edgeFunctionSource, /accessCode\.length < 20/);
-  assert.match(edgeFunctionSource, /p_access_code: accessCode/);
+  assert.doesNotMatch(edgeFunctionSource, /accessCode\.length < 20/);
+  assert.doesNotMatch(edgeFunctionSource, /p_access_code:|access_code/);
 });
 
 test("loads the server-authorized next video only after response commit", () => {
   const submitBody = getFunctionBody(assessmentClientSource, "submitPendingSubmission");
 
   assertLexicalOrder(submitBody, [
-    "await submitVideoResponse(submission, accessCode);",
-    "await loadQueue(accessCode);"
+    "await submitVideoResponse(submission);",
+    "await loadQueue();"
   ]);
 });
 
