@@ -464,18 +464,6 @@ export default function AssessmentClient() {
                 playbackUrl={signedVideoUrl}
                 videoId={currentVideo.videoId}
               />
-              <div className="video-caption">
-                <span>Watch the video and record each lesion when detected.</span>
-                <span>
-                  {videoEnded
-                    ? "Playback complete"
-                    : videoPlaying
-                      ? "Playing"
-                      : videoStarted
-                        ? "Paused"
-                        : "Ready to play"}
-                </span>
-              </div>
             </section>
 
             <aside className="response-panel" aria-label="Yes or No response">
