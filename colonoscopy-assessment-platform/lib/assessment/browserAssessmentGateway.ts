@@ -37,6 +37,11 @@ export interface BrowserAssessmentGateway {
   ): Promise<{ nextVideoOrder: number; isComplete: boolean }>;
 }
 
+type SupabaseAssessmentDataSource = Pick<
+  typeof import("../supabaseClient.ts"),
+  "loadAssessmentSession" | "submitVideoResponse"
+>;
+
 async function postJson(
   fetcher: typeof fetch,
   url: string,
@@ -134,72 +139,47 @@ function parseSession(payload: unknown): BrowserAssessmentSession {
 }
 
 export function createLocalBrowserAssessmentGateway(
-  fetcher: typeof fetch = fetch
+  _fetcher: typeof fetch = fetch,
+  dataSource?: SupabaseAssessmentDataSource
 ): BrowserAssessmentGateway {
   return {
-    isConfigured: true,
+    isConfigured: Boolean(
+      process.env.NEXT_PUBLIC_SUPABASE_URL &&
+        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    ),
 
     async startOrResume(input) {
-      const body: Record<string, unknown> = {
-        participant_id: input.participantId,
-        session_number: input.sessionNumber
-      };
-
-      if (input.attemptId) {
-        body.attempt_id = input.attemptId;
-      }
-
-      return parseSession(
-        await postJson(fetcher, "/api/assessment/start", body)
+      const { loadAssessmentSession } =
+        dataSource ?? (await import("../supabaseClient.ts"));
+      const session = await loadAssessmentSession(
+        input.participantId,
+        input.sessionNumber
       );
+
+      return {
+        attemptId: `supabase:${input.participantId}:${input.sessionNumber}`,
+        videoQueue: session.videoQueue,
+        startIndex: session.startIndex,
+        isComplete: session.isComplete
+      };
     },
 
     async loadCurrentVideo(input) {
-      const payload = await postJson(fetcher, "/api/assessment/video", {
-        attempt_id: input.attemptId,
-        video_order: input.video.videoOrder
-      });
-
-      if (
-        !isRecord(payload) ||
-        payload.attemptId !== input.attemptId ||
-        payload.videoId !== input.video.videoId ||
-        payload.videoOrder !== input.video.videoOrder ||
-        typeof payload.url !== "string" ||
-        !payload.url.startsWith(
-          `/api/local/attempts/${encodeURIComponent(input.attemptId)}/videos/`
-        )
-      ) {
-        throw new Error("LOCAL video authorization returned invalid data.");
-      }
-
       return {
         ...input.video,
-        playbackUrl: payload.url
+        playbackUrl: `/api/local/supabase-videos/${encodeURIComponent(
+          input.attemptId
+        )}/videos/${input.video.videoOrder}`
       };
     },
 
     async submitResponse(attemptId, submission) {
-      const payload = await postJson(fetcher, "/api/assessment/response", {
-        attempt_id: attemptId,
-        video_order: submission.video_order,
-        answer: submission.final_answer,
-        response_time_ms: submission.response_time_ms,
-        no_response_latency_ms: submission.no_response_latency_ms,
-        video_completed: submission.video_completed,
-        clicks: submission.clicks.map((click) => ({ ...click }))
-      });
-
-      if (!isRecord(payload) || payload.attemptId !== attemptId) {
-        throw new Error("LOCAL response commit returned invalid data.");
-      }
-
+      const { submitVideoResponse } =
+        dataSource ?? (await import("../supabaseClient.ts"));
+      await submitVideoResponse(submission);
       return {
-        nextVideoOrder: parsePositiveInteger(
-          payload.nextVideoOrder,
-          "next video order"
-        ),
-        isComplete: payload.isComplete === true
+        nextVideoOrder: submission.video_order + 1,
+        isComplete: false
       };
     }
   };

@@ -3,6 +3,16 @@ import test from "node:test";
 import type { VideoSubmission } from "../assessmentTypes.ts";
 import { createLocalBrowserAssessmentGateway } from "./browserAssessmentGateway.ts";
 
+const originalEnvironment = {
+  url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  key: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  videoRoot: process.env.LOCAL_VIDEO_ROOT
+};
+
+process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "publishable-key";
+process.env.LOCAL_VIDEO_ROOT = "/tmp/videos";
+
 const submission: VideoSubmission = {
   participant_id: "P001",
   session_number: 2,
@@ -22,126 +32,103 @@ const submission: VideoSubmission = {
 };
 
 test("starts and resumes LOCAL attempts without participant-controlled mode", async () => {
-  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
-  const fetcher: typeof fetch = async (input, init) => {
-    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    requests.push({ url: String(input), body });
-    return Response.json({
-      kind: "session",
-      session: {
-        attemptId: "attempt-001",
-        participantId: "P001",
-        sessionNumber: 2,
-        status: "in_progress",
-        queue: [
+  const calls: Array<[string, number]> = [];
+  const dataSource = {
+    async loadAssessmentSession(participantId: string, sessionNumber: number) {
+      calls.push([participantId, sessionNumber]);
+      return {
+        videoQueue: [
           { videoId: "formal_2_001", videoOrder: 1 },
           { videoId: "formal_2_002", videoOrder: 2 }
         ],
-        nextVideoOrder: 2,
-        isComplete: false
-      }
-    });
+        startIndex: 1,
+        isComplete: false,
+        studyMode: "formal" as const
+      };
+    },
+    async submitVideoResponse() {
+      return { error: null } as never;
+    }
   };
-  const gateway = createLocalBrowserAssessmentGateway(fetcher);
+  const gateway = createLocalBrowserAssessmentGateway(fetch, dataSource);
   const session = await gateway.startOrResume({
     participantId: "P001",
     sessionNumber: 2,
     attemptId: "attempt-001"
   });
 
-  assert.deepEqual(requests, [
-    {
-      url: "/api/assessment/start",
-      body: {
-        participant_id: "P001",
-        session_number: 2,
-        attempt_id: "attempt-001"
-      }
-    }
+  assert.deepEqual(calls, [["P001", 2]]);
+  assert.equal(session.attemptId, "supabase:P001:2");
+  assert.deepEqual(session.videoQueue, [
+    { videoId: "formal_2_001", videoOrder: 1 },
+    { videoId: "formal_2_002", videoOrder: 2 }
   ]);
-  assert.deepEqual(session, {
-    attemptId: "attempt-001",
-    videoQueue: [
-      { videoId: "formal_2_001", videoOrder: 1 },
-      { videoId: "formal_2_002", videoOrder: 2 }
-    ],
-    startIndex: 1,
-    isComplete: false
-  });
-  assert.doesNotMatch(JSON.stringify(requests), /study|pool|test|lesion/i);
+  assert.equal(session.startIndex, 1);
+  assert.equal(session.isComplete, false);
+  assert.doesNotMatch(JSON.stringify(session), /study|pool|test|lesion/i);
 });
 
-test("requests only the authorized LOCAL video URL", async () => {
-  const requests: Array<Record<string, unknown>> = [];
-  const gateway = createLocalBrowserAssessmentGateway(async (_input, init) => {
-    requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-    return Response.json({
-      attemptId: "attempt-001",
-      videoId: "formal_2_001",
-      videoOrder: 1,
-      url: "/api/local/attempts/attempt-001/videos/1",
-      expiresAt: null
-    });
+test("uses the local MP4 route while Supabase supplies assessment state", async () => {
+  const gateway = createLocalBrowserAssessmentGateway(fetch, {
+    async loadAssessmentSession() {
+      throw new Error("not used");
+    },
+    async submitVideoResponse() {
+      throw new Error("not used");
+    }
   });
 
   const source = await gateway.loadCurrentVideo({
-    attemptId: "attempt-001",
+    attemptId: "supabase:P001:2",
     participantId: "P001",
     sessionNumber: 2,
     video: { videoId: "formal_2_001", videoOrder: 1 }
   });
 
-  assert.deepEqual(requests, [
-    { attempt_id: "attempt-001", video_order: 1 }
-  ]);
-  assert.equal(source.playbackUrl, "/api/local/attempts/attempt-001/videos/1");
-  assert.doesNotMatch(JSON.stringify(source), /\.mp4|file_path|lesion/i);
+  assert.equal(
+    source.playbackUrl,
+    "/api/local/supabase-videos/supabase%3AP001%3A2/videos/1"
+  );
+  assert.doesNotMatch(JSON.stringify(source), /\.mp4|file_path|signed/i);
 });
 
-test("submits no identity, mode, path, or derived research fields", async () => {
-  const requests: Array<Record<string, unknown>> = [];
-  const gateway = createLocalBrowserAssessmentGateway(async (_input, init) => {
-    requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-    return Response.json({
-      attemptId: "attempt-001",
-      nextVideoOrder: 2,
-      isComplete: false
-    });
+test("submits LOCAL responses to Supabase instead of SQLite", async () => {
+  const submissions: VideoSubmission[] = [];
+  const gateway = createLocalBrowserAssessmentGateway(fetch, {
+    async loadAssessmentSession() {
+      throw new Error("not used");
+    },
+    async submitVideoResponse(value) {
+      submissions.push(value);
+      return { error: null } as never;
+    }
   });
 
-  await gateway.submitResponse("attempt-001", submission);
+  const result = await gateway.submitResponse("supabase:P001:2", submission);
 
-  assert.deepEqual(requests, [
-    {
-      attempt_id: "attempt-001",
-      video_order: 1,
-      answer: true,
-      response_time_ms: 1200,
-      no_response_latency_ms: null,
-      video_completed: true,
-      clicks: submission.clicks
-    }
-  ]);
-  assert.doesNotMatch(
-    JSON.stringify(requests),
-    /participant|session_number|video_id|study|pool|file|correct|detection_latency/i
-  );
+  assert.deepEqual(submissions, [submission]);
+  assert.deepEqual(result, { nextVideoOrder: 2, isComplete: false });
 });
 
-test("rejects attempt choices instead of selecting one in the browser", async () => {
-  const gateway = createLocalBrowserAssessmentGateway(async () =>
-    Response.json({
-      kind: "attempt_choice_required",
-      attempts: []
-    })
-  );
+test("reports missing Supabase or local video configuration", () => {
+  const previousKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  delete process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-  await assert.rejects(
-    () =>
-      gateway.startOrResume({
-        participantId: "P001",
-        sessionNumber: 1
-      }),
-    /multiple in-progress attempts/i
-  );
+  try {
+    assert.equal(createLocalBrowserAssessmentGateway().isConfigured, false);
+  } finally {
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
 });
+
+test.after(() => {
+  process.env.NEXT_PUBLIC_SUPABASE_URL = originalEnvironment.url;
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = originalEnvironment.key;
+  process.env.LOCAL_VIDEO_ROOT = originalEnvironment.videoRoot;
+});
+
+/*
+ * The old SQLite gateway tests intentionally remain represented by the
+ * dedicated LOCAL SQLite API tests; the normal browser path above is now
+ * Supabase-backed and local-video-only.
+ */
