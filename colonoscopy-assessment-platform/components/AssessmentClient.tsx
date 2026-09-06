@@ -120,7 +120,8 @@ export default function AssessmentClient({
       const videoSource = await loadCurrentVideoSource(
         normalizedParticipantId,
         parsedSessionNumber,
-        nextVideo
+        nextVideo,
+        session.studyMode
       );
       nextSignedVideoUrl = videoSource.signedUrl;
     }

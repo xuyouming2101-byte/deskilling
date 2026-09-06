@@ -9,6 +9,7 @@ import {
 const START_OR_RESUME_FUNCTION = "start_or_resume_assessment";
 const SUBMIT_RESPONSE_FUNCTION = "submit_video_response";
 const VIDEO_URL_FUNCTION = "issue-assessment-video-url";
+const FORMAL_VIDEO_URL_ENDPOINT = "/api/formal-video-url";
 const SIGNED_URL_EXPIRY_SECONDS = 6 * 60 * 60;
 
 let client: SupabaseClient | null = null;
@@ -193,19 +194,40 @@ export async function loadAssessmentSession(
 export async function loadCurrentVideoSource(
   participantId: string,
   sessionNumber: number,
-  video: VideoQueueItem
+  video: VideoQueueItem,
+  studyMode: StudyMode
 ): Promise<VideoSource> {
-  const supabase = requireSupabaseClient();
-  const { data, error } = await supabase.functions.invoke(VIDEO_URL_FUNCTION, {
-    body: {
-      participant_id: participantId,
-      session_number: sessionNumber,
-      video_order: video.videoOrder
-    }
-  });
+  const requestBody = {
+    participant_id: participantId,
+    session_number: sessionNumber,
+    video_order: video.videoOrder
+  };
 
-  if (error) {
-    throw new Error("Unable to authorize the current assessment video.");
+  let data: unknown;
+
+  if (studyMode === "formal") {
+    const formalResponse = await fetch(FORMAL_VIDEO_URL_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!formalResponse.ok) {
+      throw new Error("Unable to authorize the current formal assessment video.");
+    }
+
+    data = await formalResponse.json().catch(() => ({}));
+  } else {
+    const supabase = requireSupabaseClient();
+    const result = await supabase.functions.invoke(VIDEO_URL_FUNCTION, {
+      body: requestBody
+    });
+
+    if (result.error) {
+      throw new Error("Unable to authorize the current assessment video.");
+    }
+
+    data = result.data;
   }
 
   const response = (data ?? {}) as SignedVideoResponse;
@@ -224,6 +246,7 @@ export async function loadCurrentVideoSource(
   console.log("generated video URL", {
     video_id: video.videoId,
     video_order: video.videoOrder,
+    study_mode: studyMode,
     expires_in_seconds: expiresInSeconds
   });
 
