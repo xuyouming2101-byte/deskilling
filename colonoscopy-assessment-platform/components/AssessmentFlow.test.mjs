@@ -100,8 +100,8 @@ test("uses the current access-code-free queue and response RPCs", () => {
   assert.match(supabaseClientSource, /start_or_resume_assessment/);
   assert.match(supabaseClientSource, /buildStartOrResumeRpcParams/);
   assert.doesNotMatch(componentAndLibSource, /accessCode|Access code|access_code/);
-  assert.match(assessmentClientSource, /loadAssessmentSession\(\s*normalizedParticipantId,\s*parsedSessionNumber\s*\)/);
-  assert.match(assessmentClientSource, /submitVideoResponse\(submission\)/);
+  assert.match(assessmentClientSource, /loadAssessmentSession\(\s*normalizedParticipantId,\s*parsedSessionNumber,\s*requiresOnlinePassword\s*\)/);
+  assert.match(assessmentClientSource, /submitVideoResponse\(\s*submission,\s*requiresOnlinePassword\s*\)/);
   assert.doesNotMatch(supabaseClientSource, /\.from\(["']videos["']\)/);
   assert.doesNotMatch(supabaseClientSource, /\.from\(["']assessment_queue["']\)/);
   assert.doesNotMatch(componentAndLibSource, /has_lesion|lesion_onset_sec|hasLesion|lesionOnsetSec|detection_latency_ms/);
@@ -221,7 +221,7 @@ test("loads the server-authorized next video only after response commit", () => 
   const submitBody = getFunctionBody(assessmentClientSource, "submitPendingSubmission");
 
   assertLexicalOrder(submitBody, [
-    "await submitVideoResponse(submission);",
+    "await submitVideoResponse(submission, requiresOnlinePassword);",
     "await loadQueue();"
   ]);
 });

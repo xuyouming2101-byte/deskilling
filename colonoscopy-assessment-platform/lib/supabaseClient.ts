@@ -10,6 +10,8 @@ const START_OR_RESUME_FUNCTION = "start_or_resume_assessment";
 const SUBMIT_RESPONSE_FUNCTION = "submit_video_response";
 const VIDEO_URL_FUNCTION = "issue-assessment-video-url";
 const FORMAL_VIDEO_URL_ENDPOINT = "/api/formal-video-url";
+const ASSESSMENT_SESSION_ENDPOINT = "/api/assessment-session";
+const ASSESSMENT_SUBMIT_ENDPOINT = "/api/assessment-submit";
 const SIGNED_URL_EXPIRY_SECONDS = 6 * 60 * 60;
 
 let client: SupabaseClient | null = null;
@@ -154,16 +156,48 @@ function parseSafeQueueRows(rows: SafeQueueRow[]) {
 
 export async function loadAssessmentSession(
   participantId: string,
-  sessionNumber: number
+  sessionNumber: number,
+  viaServer = false
 ): Promise<AssessmentSession> {
-  const supabase = requireSupabaseClient();
-  const { data, error } = await supabase.rpc(
-    START_OR_RESUME_FUNCTION,
-    buildStartOrResumeRpcParams(participantId, sessionNumber)
-  );
+  let data: unknown;
 
-  if (error) {
-    throw new Error(error.message);
+  if (viaServer) {
+    const response = await fetch(ASSESSMENT_SESSION_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        participant_id: participantId,
+        session_number: sessionNumber
+      }),
+      cache: "no-store"
+    });
+
+    const payload = (await response.json().catch(() => ({}))) as {
+      data?: unknown;
+      error?: unknown;
+    };
+
+    if (!response.ok) {
+      throw new Error(
+        typeof payload.error === "string"
+          ? payload.error
+          : "Unable to load assessment session."
+      );
+    }
+
+    data = payload.data;
+  } else {
+    const supabase = requireSupabaseClient();
+    const result = await supabase.rpc(
+      START_OR_RESUME_FUNCTION,
+      buildStartOrResumeRpcParams(participantId, sessionNumber)
+    );
+
+    if (result.error) {
+      throw new Error(result.error.message);
+    }
+
+    data = result.data;
   }
 
   const parsed = parseSafeQueueRows((data ?? []) as SafeQueueRow[]);
@@ -174,13 +208,15 @@ export async function loadAssessmentSession(
 
   console.log("fetched videos", {
     queue_length: parsed.queueLength,
-    study_mode: parsed.studyMode
+    study_mode: parsed.studyMode,
+    via_server: viaServer
   });
   console.log("assessment resume status", {
     next_video_order: parsed.nextVideoOrder,
     queue_length: parsed.queueLength,
     study_mode: parsed.studyMode,
-    is_complete: isComplete
+    is_complete: isComplete,
+    via_server: viaServer
   });
 
   return {
@@ -254,8 +290,45 @@ export async function loadCurrentVideoSource(
 }
 
 export async function submitVideoResponse(
-  submission: VideoSubmission
+  submission: VideoSubmission,
+  viaServer = false
 ) {
+  if (viaServer) {
+    const response = await fetch(ASSESSMENT_SUBMIT_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(submission),
+      cache: "no-store"
+    });
+
+    const payload = (await response.json().catch(() => ({}))) as {
+      saved?: unknown;
+      error?: unknown;
+    };
+
+    console.log("response insert result", {
+      video_id: submission.video_id,
+      video_order: submission.video_order,
+      via_server: true,
+      error:
+        response.ok
+          ? null
+          : typeof payload.error === "string"
+            ? payload.error
+            : "Unable to save response."
+    });
+
+    if (!response.ok || payload.saved !== true) {
+      throw new Error(
+        typeof payload.error === "string"
+          ? payload.error
+          : "Unable to save response."
+      );
+    }
+
+    return { data: null, error: null };
+  }
+
   const supabase = requireSupabaseClient();
   const result = await supabase.rpc(
     SUBMIT_RESPONSE_FUNCTION,
@@ -265,6 +338,7 @@ export async function submitVideoResponse(
   console.log("response insert result", {
     video_id: submission.video_id,
     video_order: submission.video_order,
+    via_server: false,
     error: result.error?.message ?? null
   });
 
@@ -274,3 +348,4 @@ export async function submitVideoResponse(
 
   return result;
 }
+

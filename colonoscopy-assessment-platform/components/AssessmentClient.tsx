@@ -106,7 +106,8 @@ export default function AssessmentClient({
 
     const session = await loadAssessmentSession(
       normalizedParticipantId,
-      parsedSessionNumber
+      parsedSessionNumber,
+      requiresOnlinePassword
     );
     let nextSignedVideoUrl = "";
 
@@ -288,7 +289,7 @@ export default function AssessmentClient({
     setSaveError("");
 
     try {
-      await submitVideoResponse(submission);
+      await submitVideoResponse(submission, requiresOnlinePassword);
       await loadQueue();
       setSaveState("saved");
     } catch (error) {

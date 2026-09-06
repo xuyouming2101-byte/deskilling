@@ -1,4 +1,8 @@
 import {
+  buildAssessmentAccessSetCookie,
+  createAssessmentAccessToken
+} from "../../../lib/assessmentAccessToken.ts";
+import {
   isStudyParticipantId,
   participantPassword
 } from "../../../lib/participantAccess.ts";
@@ -17,14 +21,39 @@ type ClaimRow = {
   is_open?: unknown;
 };
 
-function json(body: object, status: number) {
+function json(
+  body: object,
+  status: number,
+  extraHeaders?: Record<string, string>
+) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json",
-      "Cache-Control": "private, no-store"
+      "Cache-Control": "private, no-store",
+      ...extraHeaders
     }
   });
+}
+
+function authorizedResponse(
+  participantId: string,
+  sessionNumber: number,
+  master: boolean,
+  signingSecret: string
+) {
+  const token = createAssessmentAccessToken({
+    participantId,
+    sessionNumber,
+    secret: signingSecret,
+    nowSeconds: Math.floor(Date.now() / 1000)
+  });
+
+  return json(
+    { authorized: true, master },
+    200,
+    { "Set-Cookie": buildAssessmentAccessSetCookie(token) }
+  );
 }
 
 export async function POST(request: Request) {
@@ -33,8 +62,10 @@ export async function POST(request: Request) {
   }
 
   const masterPassword = process.env.STUDY_SHARED_PASSWORD;
-  if (!masterPassword) {
-    return json({ error: "Online study password is not configured." }, 500);
+  const signingSecret = process.env.FORMAL_VIDEO_SIGNING_SECRET;
+
+  if (!masterPassword || !signingSecret) {
+    return json({ error: "Online study access is not configured." }, 500);
   }
 
   let body: AccessBody;
@@ -65,10 +96,15 @@ export async function POST(request: Request) {
     return json({ error: "Incorrect Participant ID or password." }, 401);
   }
 
-  // Master bypass: no participant-password check, no schedule check,
-  // and crucially it does NOT start/change the participant's Day 0.
+  // Master bypasses participant-password and schedule checks.
+  // It intentionally does NOT start/change the participant's Day 0.
   if (password === masterPassword) {
-    return json({ authorized: true, master: true }, 200);
+    return authorizedResponse(
+      participantId,
+      sessionNumber,
+      true,
+      signingSecret
+    );
   }
 
   if (
@@ -127,5 +163,10 @@ export async function POST(request: Request) {
     return json({ error: "This session is not yet available." }, 403);
   }
 
-  return json({ authorized: true, master: false }, 200);
+  return authorizedResponse(
+    participantId,
+    sessionNumber,
+    false,
+    signingSecret
+  );
 }
