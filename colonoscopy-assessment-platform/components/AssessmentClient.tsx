@@ -86,7 +86,7 @@ export default function AssessmentClient({
   const submissionInFlightRef = useRef(false);
   const videoStartedAtRef = useRef<number | null>(null);
   const videoEndedAtRef = useRef<number | null>(null);
-  const normalizedParticipantId = participantId.trim();
+  const normalizedParticipantId = participantId.trim().toUpperCase();
   const parsedSessionNumber = Number.parseInt(sessionNumber, 10);
 
   useEffect(() => {
@@ -167,7 +167,11 @@ export default function AssessmentClient({
         const response = await fetch("/api/online-password", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ password: onlinePassword })
+          body: JSON.stringify({
+            participant_id: normalizedParticipantId,
+            session_number: parsedSessionNumber,
+            password: onlinePassword
+          })
         });
         const result = (await response.json().catch(() => ({}))) as {
           authorized?: boolean;
@@ -402,7 +406,7 @@ export default function AssessmentClient({
               <input
                 autoComplete="off"
                 onChange={(event) => setParticipantId(event.target.value)}
-                placeholder="P001"
+                placeholder="P01"
                 value={participantId}
               />
             </label>

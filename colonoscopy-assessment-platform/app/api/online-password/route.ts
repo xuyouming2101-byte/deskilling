@@ -1,35 +1,131 @@
-import { NextResponse } from "next/server";
+import {
+  isStudyParticipantId,
+  participantPassword
+} from "../../../lib/participantAccess.ts";
 
 export const dynamic = "force-dynamic";
 
+type AccessBody = {
+  participant_id?: unknown;
+  session_number?: unknown;
+  password?: unknown;
+};
+
+type ClaimRow = {
+  opens_at?: unknown;
+  server_now?: unknown;
+  is_open?: unknown;
+};
+
+function json(body: object, status: number) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "private, no-store"
+    }
+  });
+}
+
 export async function POST(request: Request) {
   if (process.env.ASSESSMENT_DEPLOYMENT_MODE === "local") {
-    return NextResponse.json({ error: "Online password is unavailable." }, { status: 404 });
+    return json({ error: "Online password is unavailable." }, 404);
   }
 
-  const expectedPassword = process.env.STUDY_SHARED_PASSWORD;
-  if (!expectedPassword) {
-    return NextResponse.json(
-      { error: "Online study password is not configured." },
-      { status: 500 }
+  const masterPassword = process.env.STUDY_SHARED_PASSWORD;
+  if (!masterPassword) {
+    return json({ error: "Online study password is not configured." }, 500);
+  }
+
+  let body: AccessBody;
+  try {
+    body = (await request.json()) as AccessBody;
+  } catch {
+    return json({ error: "Incorrect Participant ID or password." }, 401);
+  }
+
+  const participantId =
+    typeof body.participant_id === "string"
+      ? body.participant_id.trim().toUpperCase()
+      : "";
+  const sessionNumber =
+    typeof body.session_number === "number"
+      ? body.session_number
+      : Number(body.session_number);
+  const password =
+    typeof body.password === "string" ? body.password : "";
+
+  if (
+    !participantId ||
+    !Number.isInteger(sessionNumber) ||
+    sessionNumber < 1 ||
+    sessionNumber > 3 ||
+    !password
+  ) {
+    return json({ error: "Incorrect Participant ID or password." }, 401);
+  }
+
+  // Master bypass: no participant-password check, no schedule check,
+  // and crucially it does NOT start/change the participant's Day 0.
+  if (password === masterPassword) {
+    return json({ authorized: true, master: true }, 200);
+  }
+
+  if (
+    !isStudyParticipantId(participantId) ||
+    password !== participantPassword(participantId)
+  ) {
+    return json({ error: "Incorrect Participant ID or password." }, 401);
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return json(
+      { error: "Participant schedule service is not configured." },
+      500
     );
   }
 
-  let body: unknown;
+  let claimResponse: Response;
   try {
-    body = await request.json();
+    claimResponse = await fetch(
+      `${supabaseUrl}/rest/v1/rpc/claim_participant_session_access`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          apikey: serviceRoleKey,
+          authorization: `Bearer ${serviceRoleKey}`
+        },
+        body: JSON.stringify({
+          p_participant_id: participantId,
+          p_session_number: sessionNumber
+        }),
+        cache: "no-store"
+      }
+    );
   } catch {
-    return NextResponse.json({ error: "Incorrect password." }, { status: 401 });
+    return json(
+      { error: "Unable to verify session availability. Please try again." },
+      503
+    );
   }
 
-  const providedPassword =
-    typeof body === "object" && body !== null && "password" in body
-      ? body.password
-      : undefined;
-
-  if (typeof providedPassword !== "string" || providedPassword !== expectedPassword) {
-    return NextResponse.json({ error: "Incorrect password." }, { status: 401 });
+  if (!claimResponse.ok) {
+    return json(
+      { error: "Unable to verify session availability. Please try again." },
+      503
+    );
   }
 
-  return NextResponse.json({ authorized: true });
+  const rows = (await claimResponse.json().catch(() => [])) as ClaimRow[];
+  const isOpen = rows.length === 1 && rows[0]?.is_open === true;
+
+  if (!isOpen) {
+    return json({ error: "This session is not yet available." }, 403);
+  }
+
+  return json({ authorized: true, master: false }, 200);
 }
