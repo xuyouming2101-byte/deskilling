@@ -1,111 +1,35 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  ASSESSMENT_ACCESS_COOKIE,
-  createAssessmentAccessToken
-} from "./assessmentAccessToken.ts";
+import { configure, database, request, submission } from "./postgresRouteFixture.ts";
+import { POST } from "../app/api/assessment-submit/route.ts";
 
-async function loadRoute() {
-  return import("../app/api/assessment-submit/route.ts");
-}
-
-function configure() {
-  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
-  process.env.FORMAL_VIDEO_SIGNING_SECRET = "signing-secret";
-}
-
-const submission = {
-  participant_id: "P60",
-  session_number: 1,
-  video_id: "T1_001",
-  video_order: 1,
-  final_answer: true,
-  response_time_ms: 1234,
-  no_response_latency_ms: null,
-  video_completed: true,
-  clicks: [
-    {
-      click_index: 1,
-      video_time_at_click: 12.345,
-      response_time_ms: 1234
-    }
-  ]
-};
-
-function request(cookie?: string) {
-  return new Request("http://localhost/api/assessment-submit", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(cookie ? { cookie } : {})
-    },
-    body: JSON.stringify(submission)
-  });
-}
-
-test("assessment submit proxy rejects a request without access cookie", async () => {
-  const { POST } = await loadRoute();
-  configure();
-
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => {
-    assert.fail("unauthorized request must not reach Supabase");
-  };
-
-  try {
-    const response = await POST(request());
-    assert.equal(response.status, 403);
-  } finally {
-    globalThis.fetch = originalFetch;
+test("submit rejects absent and wrong identity/session cookies", async () => {
+  configure(); database(() => assert.fail("Unauthorized DB call"));
+  for (const cookie of [null, { participantId: "P59", sessionNumber: 1 }, { participantId: "P60", sessionNumber: 2 }]) {
+    assert.equal((await POST(request("assessment-submit", submission, cookie))).status, 403);
   }
 });
 
-test("assessment submit proxy calls submit_video_response with service role", async () => {
-  const { POST } = await loadRoute();
+test("submit preserves marks/NULL/boolean/bigint parameters and serializes JSONB explicitly", async () => {
   configure();
-
-  const token = createAssessmentAccessToken({
-    participantId: "P60",
-    sessionNumber: 1,
-    secret: "signing-secret",
-    nowSeconds: Math.floor(Date.now() / 1000)
+  database((sql, values) => {
+    assert.equal(sql, "SELECT public.submit_video_response($1::text, $2::integer, $3::text, $4::integer, $5::boolean, $6::bigint, $7::bigint, $8::boolean, $9::jsonb)");
+    assert.deepEqual(values, ["P60", 1, "T1_001", 1, true, 1234, null, true, JSON.stringify(submission.clicks)]);
+    return [{ submit_video_response: "" }];
   });
+  const response = await POST(request("assessment-submit", submission));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { saved: true });
+});
 
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input, init) => {
-    assert.equal(
-      String(input),
-      "https://example.supabase.co/rest/v1/rpc/submit_video_response"
-    );
-    const headers = new Headers(init?.headers);
-    assert.equal(headers.get("apikey"), "service-role");
-    assert.equal(headers.get("authorization"), "Bearer service-role");
-
-    const body = JSON.parse(String(init?.body));
-    assert.equal(body.p_participant_id, "P60");
-    assert.equal(body.p_session_number, 1);
-    assert.equal(body.p_video_id, "T1_001");
-    assert.equal(body.p_video_order, 1);
-    assert.equal(body.p_answer, true);
-    assert.deepEqual(body.p_clicks, [
-      {
-        click_index: 1,
-        video_time_at_click: 12.345,
-        response_time_ms: 1234
-      }
-    ]);
-
-    return new Response(null, { status: 204 });
-  };
-
-  try {
-    const response = await POST(
-      request(`${ASSESSMENT_ACCESS_COOKIE}=${token}`)
-    );
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { saved: true });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+test("no-lesion sends an empty JSON array and failed atomic submission never reports saved", async () => {
+  configure();
+  database((sql, values) => {
+    assert.match(sql, /\$9::jsonb/);
+    assert.equal(values[4], false); assert.equal(values[6], 0); assert.equal(values[8], "[]");
+    throw Object.assign(new Error("existing response differs from retry payload"), { code: "P0001" });
+  });
+  const response = await POST(request("assessment-submit", { ...submission, final_answer: false, no_response_latency_ms: 0, clicks: [] }));
+  assert.equal(response.status, 400);
+  assert.notEqual((await response.json()).saved, true);
 });

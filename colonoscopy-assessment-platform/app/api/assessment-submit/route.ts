@@ -1,3 +1,4 @@
+import { assessmentDatabase, AssessmentDatabaseError, isPostgresConfigured } from "../../../lib/server/postgres.ts";
 import type { VideoSubmission } from "../../../lib/assessmentTypes.ts";
 import {
   readAssessmentAccessCookie,
@@ -8,7 +9,6 @@ import { buildSubmissionRpcParams } from "../../../lib/lesionResponse.ts";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const SUBMIT_RESPONSE_RPC = "submit_video_response";
 
 function json(body: object, status: number) {
   return new Response(JSON.stringify(body), {
@@ -20,26 +20,10 @@ function json(body: object, status: number) {
   });
 }
 
-function rpcErrorMessage(value: unknown) {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "message" in value &&
-    typeof value.message === "string" &&
-    value.message
-  ) {
-    return value.message;
-  }
-
-  return "Unable to save response.";
-}
-
 export async function POST(request: Request) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const signingSecret = process.env.FORMAL_VIDEO_SIGNING_SECRET;
 
-  if (!supabaseUrl || !serviceRoleKey || !signingSecret) {
+  if (!isPostgresConfigured() || !signingSecret) {
     return json({ error: "Assessment service is not configured." }, 500);
   }
 
@@ -80,43 +64,14 @@ export async function POST(request: Request) {
     return json({ error: "Assessment access denied." }, 403);
   }
 
-  let response: Response;
   try {
-    response = await fetch(
-      `${supabaseUrl}/rest/v1/rpc/${SUBMIT_RESPONSE_RPC}`,
-      {
-        method: "POST",
-        headers: {
-          apikey: serviceRoleKey,
-          authorization: `Bearer ${serviceRoleKey}`,
-          "content-type": "application/json"
-        },
-        body: JSON.stringify(
-          buildSubmissionRpcParams({
-            ...submission,
-            participant_id: participantId,
-            session_number: sessionNumber
-          })
-        ),
-        cache: "no-store"
-      }
-    );
-  } catch {
-    return json({ error: "Unable to reach assessment database." }, 503);
+    const params = buildSubmissionRpcParams({
+      ...submission, participant_id: participantId, session_number: sessionNumber
+    });
+    await assessmentDatabase.submit(params);
+    return json({ saved: true }, 200);
+  } catch (error) {
+    return json({ error: error instanceof AssessmentDatabaseError ? error.message : "Invalid response submission." },
+      error instanceof AssessmentDatabaseError ? error.status : 400);
   }
-
-  let result: unknown = null;
-  if (response.status !== 204) {
-    try {
-      result = await response.json();
-    } catch {
-      result = null;
-    }
-  }
-
-  if (!response.ok) {
-    return json({ error: rpcErrorMessage(result) }, 400);
-  }
-
-  return json({ saved: true }, 200);
 }

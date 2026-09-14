@@ -1,99 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  ASSESSMENT_ACCESS_COOKIE,
-  createAssessmentAccessToken
-} from "./assessmentAccessToken.ts";
+import { configure, database, identity, request } from "./postgresRouteFixture.ts";
+import { POST } from "../app/api/assessment-session/route.ts";
 
-async function loadRoute() {
-  return import("../app/api/assessment-session/route.ts");
-}
-
-function configure() {
-  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
-  process.env.FORMAL_VIDEO_SIGNING_SECRET = "signing-secret";
-}
-
-function request(cookie?: string) {
-  return new Request("http://localhost/api/assessment-session", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(cookie ? { cookie } : {})
-    },
-    body: JSON.stringify({
-      participant_id: "P60",
-      session_number: 1
-    })
-  });
-}
-
-test("assessment session proxy rejects a request without access cookie", async () => {
-  const { POST } = await loadRoute();
+test("session rejects absent or mismatched cookie before database access", async () => {
   configure();
-
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => {
-    assert.fail("unauthorized request must not reach Supabase");
-  };
-
-  try {
-    const response = await POST(request());
-    assert.equal(response.status, 403);
-  } finally {
-    globalThis.fetch = originalFetch;
+  const query = database(() => assert.fail("Unauthorized DB call"));
+  for (const cookie of [null, { participantId: "P59", sessionNumber: 1 }, { participantId: "P60", sessionNumber: 2 }]) {
+    assert.equal((await POST(request("assessment-session", identity, cookie))).status, 403);
   }
+  assert.equal(query.mock.callCount(), 0);
 });
 
-test("assessment session proxy calls start_or_resume with service role", async () => {
-  const { POST } = await loadRoute();
+test("session uses parameterized PostgreSQL with no Supabase configuration", async () => {
   configure();
-
-  const token = createAssessmentAccessToken({
-    participantId: "P60",
-    sessionNumber: 1,
-    secret: "signing-secret",
-    nowSeconds: Math.floor(Date.now() / 1000)
+  database((sql, values) => {
+    assert.equal(sql, "SELECT * FROM public.start_or_resume_assessment($1::text, $2::integer)");
+    assert.deepEqual(values, ["P60", 1]);
+    return [{ video_id: "T1_001", video_order: 1, next_video_order: 1, queue_length: 1, study_mode: "formal" }];
   });
+  const response = await POST(request("assessment-session", identity));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).data[0].video_id, "T1_001");
+});
 
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input, init) => {
-    assert.equal(
-      String(input),
-      "https://example.supabase.co/rest/v1/rpc/start_or_resume_assessment"
-    );
-    const headers = new Headers(init?.headers);
-    assert.equal(headers.get("apikey"), "service-role");
-    assert.equal(headers.get("authorization"), "Bearer service-role");
-    assert.deepEqual(JSON.parse(String(init?.body)), {
-      p_participant_id: "P60",
-      p_session_number: 1
-    });
-
-    return new Response(
-      JSON.stringify([
-        {
-          video_id: "T1_001",
-          video_order: 1,
-          next_video_order: 1,
-          queue_length: 1,
-          study_mode: "formal"
-        }
-      ]),
-      { status: 200, headers: { "content-type": "application/json" } }
-    );
-  };
-
-  try {
-    const response = await POST(
-      request(`${ASSESSMENT_ACCESS_COOKIE}=${token}`)
-    );
-    assert.equal(response.status, 200);
-    const result = await response.json();
-    assert.equal(Array.isArray(result.data), true);
-    assert.equal(result.data[0].video_id, "T1_001");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+test("database outage fails closed without exposing connection details", async () => {
+  configure();
+  database(() => { throw new Error("postgresql://deskilling_app:private-password@host/db"); });
+  const response = await POST(request("assessment-session", identity));
+  assert.equal(response.status, 503);
+  assert.doesNotMatch(await response.text(), /private-password|postgresql:\/\//);
 });

@@ -1,3 +1,4 @@
+import { assessmentDatabase, AssessmentDatabaseError, isPostgresConfigured } from "../../../lib/server/postgres.ts";
 import {
   buildAssessmentAccessSetCookie,
   createAssessmentAccessToken
@@ -114,49 +115,24 @@ export async function POST(request: Request) {
     return json({ error: "Incorrect Participant ID or password." }, 401);
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!supabaseUrl || !serviceRoleKey) {
+  if (!isPostgresConfigured()) {
     return json(
       { error: "Participant schedule service is not configured." },
       500
     );
   }
 
-  let claimResponse: Response;
+  let rows: ClaimRow[];
   try {
-    claimResponse = await fetch(
-      `${supabaseUrl}/rest/v1/rpc/claim_participant_session_access`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          apikey: serviceRoleKey,
-          authorization: `Bearer ${serviceRoleKey}`
-        },
-        body: JSON.stringify({
-          p_participant_id: participantId,
-          p_session_number: sessionNumber
-        }),
-        cache: "no-store"
-      }
-    );
-  } catch {
+    rows = await assessmentDatabase.claim(participantId, sessionNumber);
+  } catch (error) {
     return json(
       { error: "Unable to verify session availability. Please try again." },
-      503
+      error instanceof AssessmentDatabaseError && error.status === 500 ? 500 : 503
     );
   }
 
-  if (!claimResponse.ok) {
-    return json(
-      { error: "Unable to verify session availability. Please try again." },
-      503
-    );
-  }
-
-  const rows = (await claimResponse.json().catch(() => [])) as ClaimRow[];
   const isOpen = rows.length === 1 && rows[0]?.is_open === true;
 
   if (!isOpen) {

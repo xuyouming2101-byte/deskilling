@@ -1,3 +1,5 @@
+import { readAssessmentAccessCookie, verifyAssessmentAccessToken } from "../../../lib/assessmentAccessToken.ts";
+import { assessmentDatabase, AssessmentDatabaseError, isPostgresConfigured } from "../../../lib/server/postgres.ts";
 import {
   createFormalVideoSignature,
   isAllowedFormalVideoPath
@@ -7,7 +9,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const SIGNED_URL_EXPIRY_SECONDS = 6 * 60 * 60;
-const AUTHORIZATION_RPC = "authorize_current_assessment_video";
 const FORMAL_ECS_BUCKET = "FORMAL_ECS";
 
 function json(body: object, status: number) {
@@ -21,11 +22,9 @@ function json(body: object, status: number) {
 }
 
 export async function POST(request: Request) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const signingSecret = process.env.FORMAL_VIDEO_SIGNING_SECRET;
 
-  if (!supabaseUrl || !serviceRoleKey || !signingSecret) {
+  if (!isPostgresConfigured() || !signingSecret) {
     return json(
       { error: "Formal video service is not configured." },
       500
@@ -45,7 +44,7 @@ export async function POST(request: Request) {
     body !== null &&
     "participant_id" in body &&
     typeof body.participant_id === "string"
-      ? body.participant_id.trim()
+      ? body.participant_id.trim().toUpperCase()
       : "";
 
   const sessionNumber =
@@ -73,33 +72,18 @@ export async function POST(request: Request) {
     return json({ error: "Video access denied." }, 403);
   }
 
-  const authorizationResponse = await fetch(
-    `${supabaseUrl}/rest/v1/rpc/${AUTHORIZATION_RPC}`,
-    {
-      method: "POST",
-      headers: {
-        apikey: serviceRoleKey,
-        authorization: `Bearer ${serviceRoleKey}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        p_participant_id: participantId,
-        p_session_number: sessionNumber,
-        p_video_order: videoOrder
-      })
-    }
-  );
-
-  if (!authorizationResponse.ok) {
-    return json({ error: "Video access denied." }, 403);
-  }
+  const token = readAssessmentAccessCookie(request.headers.get("cookie"));
+  if (!token || !verifyAssessmentAccessToken({
+    token, participantId, sessionNumber, secret: signingSecret,
+    nowSeconds: Math.floor(Date.now() / 1000)
+  })) return json({ error: "Video access denied." }, 403);
 
   let rows: unknown;
-
   try {
-    rows = await authorizationResponse.json();
-  } catch {
-    return json({ error: "Video access denied." }, 403);
+    rows = await assessmentDatabase.authorize(participantId, sessionNumber, videoOrder);
+  } catch (error) {
+    const status = error instanceof AssessmentDatabaseError && error.status !== 400 ? error.status : 403;
+    return json({ error: status === 403 ? "Video access denied." : "Unable to reach assessment database." }, status);
   }
 
   if (!Array.isArray(rows) || rows.length !== 1) {

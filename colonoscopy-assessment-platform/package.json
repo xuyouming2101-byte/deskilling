@@ -7,7 +7,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test components/*.test.mjs lib/*.test.ts supabase/*.test.mjs",
+    "test": "node --conditions=react-server --test components/*.test.mjs lib/*.test.ts supabase/*.test.mjs",
+    "test:postgres": "node --conditions=react-server --test tests/postgres-integration.test.mjs",
     "upload:video": "node scripts/upload-video.mjs",
     "typecheck": "tsc --noEmit"
   },
@@ -15,13 +16,16 @@
     "@supabase/supabase-js": "^2.55.0",
     "lucide-react": "^0.468.0",
     "next": "^16.3.0",
+    "pg": "^8.23.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "server-only": "^0.0.1",
     "survey-core": "^2.5.0",
     "survey-react-ui": "^2.5.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.8.0"

@@ -1,174 +1,43 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { configure, database, identity, request } from "./postgresRouteFixture.ts";
+import { POST } from "../app/api/formal-video-url/route.ts";
+const body = { ...identity, video_order: 1 };
 
-const routePath = fileURLToPath(
-  new URL("../app/api/formal-video-url/route.ts", import.meta.url)
-);
-
-async function loadRoute() {
-  assert.equal(
-    existsSync(routePath),
-    true,
-    "formal-video-url route does not exist yet — expected RED"
-  );
-
-  return import("../app/api/formal-video-url/route.ts");
-}
-
-function requestBody() {
-  return new Request("http://localhost/api/formal-video-url", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      participant_id: "P001",
-      session_number: 1,
-      video_order: 1
-    })
+test("missing formal video server configuration fails closed", async () => {
+  configure(); delete process.env.DATABASE_URL;
+  assert.equal((await POST(request("formal-video-url", body))).status, 500);
+});
+test("formal authorization rejects missing or wrong cookie", async () => {
+  configure(); database(() => assert.fail("Unauthorized DB call"));
+  for (const cookie of [null, { participantId: "P59", sessionNumber: 1 }, { participantId: "P60", sessionNumber: 2 }]) {
+    assert.equal((await POST(request("formal-video-url", body, cookie))).status, 403);
+  }
+});
+test("database current-video authorization failure is rejected", async () => {
+  configure(); database(() => { throw Object.assign(new Error("assessment video is not available"), { code: "P0001" }); });
+  assert.equal((await POST(request("formal-video-url", body))).status, 403);
+});
+test("authorized non-ECS video or unsafe path is rejected", async () => {
+  configure();
+  let row = { bucket: "SSL", file_path: "video_001.mp4" };
+  database(() => [row]);
+  assert.equal((await POST(request("formal-video-url", body))).status, 403);
+  row = { bucket: "FORMAL_ECS", file_path: "../private.mp4" };
+  assert.equal((await POST(request("formal-video-url", body))).status, 403);
+});
+test("authorized FORMAL_ECS video receives the unchanged six-hour relative HMAC URL", async () => {
+  configure(); database((sql, values) => {
+    assert.equal(sql, "SELECT * FROM public.authorize_current_assessment_video($1::text, $2::integer, $3::integer)");
+    assert.deepEqual(values, ["P60", 1, 1]);
+    return [{ bucket: "FORMAL_ECS", file_path: "Test1/videos/T1_001.mp4" }];
   });
-}
-
-test("missing server configuration fails closed", async () => {
-  const { POST } = await loadRoute();
-
-  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
-  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-  delete process.env.FORMAL_VIDEO_SIGNING_SECRET;
-
-  const response = await POST(requestBody());
-
-  assert.equal(response.status, 500);
-});
-
-test("Supabase authorization failure is rejected", async () => {
-  const { POST } = await loadRoute();
-
-  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role";
-  process.env.FORMAL_VIDEO_SIGNING_SECRET = "test-signing-secret";
-
-  const originalFetch = globalThis.fetch;
-
-  globalThis.fetch = async () =>
-    new Response(JSON.stringify({ message: "denied" }), {
-      status: 400,
-      headers: { "content-type": "application/json" }
-    });
-
-  try {
-    const response = await POST(requestBody());
-    assert.equal(response.status, 403);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("authorized non-ECS video is rejected", async () => {
-  const { POST } = await loadRoute();
-
-  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role";
-  process.env.FORMAL_VIDEO_SIGNING_SECRET = "test-signing-secret";
-
-  const originalFetch = globalThis.fetch;
-
-  globalThis.fetch = async () =>
-    new Response(
-      JSON.stringify([
-        {
-          bucket: "SSL",
-          file_path: "video_001.mp4"
-        }
-      ]),
-      {
-        status: 200,
-        headers: { "content-type": "application/json" }
-      }
-    );
-
-  try {
-    const response = await POST(requestBody());
-    assert.equal(response.status, 403);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("authorized FORMAL_ECS video receives a six-hour signed URL", async () => {
-  const { POST } = await loadRoute();
-
-  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role";
-  process.env.FORMAL_VIDEO_SIGNING_SECRET = "test-signing-secret";
-
-  const originalFetch = globalThis.fetch;
-
-  globalThis.fetch = async (input, init) => {
-    assert.equal(
-      String(input),
-      "https://example.supabase.co/rest/v1/rpc/authorize_current_assessment_video"
-    );
-
-    assert.equal(init?.method, "POST");
-
-    const headers = new Headers(init?.headers);
-    assert.equal(headers.get("apikey"), "test-service-role");
-    assert.equal(
-      headers.get("authorization"),
-      "Bearer test-service-role"
-    );
-
-    const body = JSON.parse(String(init?.body));
-
-    assert.deepEqual(body, {
-      p_participant_id: "P001",
-      p_session_number: 1,
-      p_video_order: 1
-    });
-
-    return new Response(
-      JSON.stringify([
-        {
-          bucket: "FORMAL_ECS",
-          file_path: "Test1/videos/T1_001.mp4"
-        }
-      ]),
-      {
-        status: 200,
-        headers: { "content-type": "application/json" }
-      }
-    );
-  };
-
-  try {
-    const response = await POST(requestBody());
-
-    assert.equal(response.status, 200);
-
-    const result = await response.json();
-
-    assert.equal(result.video_order, 1);
-    assert.equal(result.expires_in_seconds, 21600);
-
-    assert.match(
-      result.signed_url,
-      /^\/api\/formal-video\?/
-    );
-
-    const signed = new URL(
-      result.signed_url,
-      "http://localhost"
-    );
-
-    assert.equal(
-      signed.searchParams.get("path"),
-      "Test1/videos/T1_001.mp4"
-    );
-
-    assert.ok(signed.searchParams.get("expires"));
-    assert.ok(signed.searchParams.get("sig"));
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const response = await POST(request("formal-video-url", body));
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.video_order, 1); assert.equal(result.expires_in_seconds, 21600);
+  assert.match(result.signed_url, /^\/api\/formal-video\?/);
+  const signed = new URL(result.signed_url, "http://localhost");
+  assert.equal(signed.searchParams.get("path"), "Test1/videos/T1_001.mp4");
+  assert.ok(signed.searchParams.get("expires")); assert.ok(signed.searchParams.get("sig"));
 });

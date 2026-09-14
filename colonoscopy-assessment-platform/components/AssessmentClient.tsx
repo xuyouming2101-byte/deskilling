@@ -25,12 +25,12 @@ import {
   STUDY_SESSION_NUMBERS
 } from "@/lib/sessionConfig";
 import {
-  isSupabaseConfigured,
+  isAssessmentConfigured,
   loadAssessmentSession,
   loadCurrentVideoSource,
   submitVideoResponse,
   type VideoQueueItem
-} from "@/lib/supabaseClient";
+} from "@/lib/assessmentClient";
 import { captureVideoTimeAtClick } from "@/lib/timing";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -77,7 +77,7 @@ export default function AssessmentClient({
   const [completedSession, setCompletedSession] =
     useState<CompletedSession | null>(null);
 
-  const configured = isSupabaseConfigured();
+  const configured = isAssessmentConfigured(requiresOnlinePassword);
   const currentVideo = videoQueue[currentIndex] ?? null;
   const totalVideos = videoQueue.length;
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -122,7 +122,8 @@ export default function AssessmentClient({
         normalizedParticipantId,
         parsedSessionNumber,
         nextVideo,
-        session.studyMode
+        session.studyMode,
+        requiresOnlinePassword
       );
       nextSignedVideoUrl = videoSource.signedUrl;
     }

@@ -18,7 +18,7 @@ const verificationArtifacts = [
     import.meta.url
   ),
   new URL(
-    "../../.superpowers/sdd/2026-08-21-multi-lesion-click-audit/task-2-brief.md",
+    "../test/fixtures/multi-lesion-click-audit/task-2-brief.md",
     import.meta.url
   )
 ];
