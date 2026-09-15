@@ -3,8 +3,8 @@ import "survey-core/survey-core.min.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Colonoscopy Lesion Check",
-  description: "Supabase-backed colonoscopy assessment queue"
+  title: "lesion detection",
+  description: "Video-based lesion detection assessment."
 };
 
 export default function RootLayout({

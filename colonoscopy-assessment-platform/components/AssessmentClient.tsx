@@ -387,9 +387,9 @@ export default function AssessmentClient({
     totalVideos > 0 ? Math.round(((currentIndex + 1) / totalVideos) * 100) : 0;
 
   return (
-    <main className="assessment-shell">
+    <main className="assessment-shell" data-phase={phase}>
       <section className="topbar" aria-label="Assessment status">
-        <h1>Colonoscopy Lesion Check</h1>
+        <h1>lesion detection</h1>
       </section>
 
       {phase === "intake" && (
@@ -462,28 +462,6 @@ export default function AssessmentClient({
             </button>
           </form>
 
-          <aside className="protocol-panel" aria-label="Assessment setup">
-            <div className="metric-row">
-              <span>Queue</span>
-              <strong>Eligible videos</strong>
-            </div>
-            <div className="metric-row">
-              <span>Mode</span>
-              <strong>Server controlled</strong>
-            </div>
-            <div className="metric-row">
-              <span>Source</span>
-              <strong>Private study videos</strong>
-            </div>
-            <div className="metric-row">
-              <span>Sessions</span>
-              <strong>1, 2, 3</strong>
-            </div>
-            <div className="metric-row">
-              <span>Responses</span>
-              <strong>Recorded securely</strong>
-            </div>
-          </aside>
         </section>
       )}
 
