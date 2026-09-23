@@ -36,7 +36,7 @@ test("not-yet-open session is rejected without cookie", async () => {
 
 test("all participant IDs and sessions require a password before any Day 0 query", async () => {
   configure(); database(() => assert.fail("Missing/wrong password must not query"));
-  for (let n=1;n<=60;n++) for (const session_number of [1,2,3]) {
+  for (let n=1;n<=100;n++) for (const session_number of [1,2,3]) {
     for (const password of [undefined,"","wrong"]) {
       const response = await POST(request("online-password", {participant_id:`P${String(n).padStart(2,"0")}`,session_number,password},null));
       assert.equal(response.status,401);
@@ -49,11 +49,11 @@ test("OFF and ON participants use the same password claim and bound cookie", asy
   configure();
   const query=database((sql,values)=>{
     assert.equal(sql,"SELECT * FROM public.claim_participant_session_access($1::text, $2::integer)");
-    assert.ok(["P01","P20","P21","P40","P41","P58","P59"].includes(values[0] as string));
+    assert.ok(["P01","P20","P21","P40","P41","P58","P59","P60","P61","P99","P100"].includes(values[0] as string));
     assert.equal(values[1],1);
     return [{is_open:true}];
   });
-  for (const participantId of ["P01","P20","P21","P40","P41","P58","P59"]) {
+  for (const participantId of ["P01","P20","P21","P40","P41","P58","P59","P60","P61","P99","P100"]) {
     const response=await POST(request("online-password",{participant_id:participantId,session_number:1,password:`deskilling${participantId}`},null));
     assert.equal(response.status,200);
     const header=response.headers.get("set-cookie")!;
@@ -61,5 +61,12 @@ test("OFF and ON participants use the same password claim and bound cookie", asy
     const token=readAssessmentAccessCookie(header)!;
     for(const sessionNumber of [1,2,3]) assert.equal(verifyAssessmentAccessToken({token,participantId,sessionNumber,secret:"unit-signing-secret",nowSeconds:Math.floor(Date.now()/1000)}),sessionNumber===1);
   }
-  assert.equal(query.mock.callCount(),7);
+  assert.equal(query.mock.callCount(),11);
+});
+
+test("out-of-roster password is rejected before any database query", async () => {
+  configure(); database(() => assert.fail("Unknown participant must not query"));
+  const response = await POST(request("online-password", {participant_id:"P101",session_number:1,password:"deskillingP101"},null));
+  assert.equal(response.status,401);
+  assert.equal(response.headers.get("set-cookie"),null);
 });
