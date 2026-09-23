@@ -17,6 +17,16 @@ async function loadHelper() {
   return import("./formalVideoAuth.ts");
 }
 
+test("allows exactly the 40 AI-ON baseline paths without expanding other pools", async () => {
+  const { isAllowedFormalVideoPath } = await loadHelper();
+  for (let n = 1; n <= 40; n++) {
+    assert.equal(isAllowedFormalVideoPath(`Test1/AION/videos/${String(n).padStart(2, "0")}_ai.mp4`), true);
+  }
+  for (const path of ["Test1/AION/videos/00_ai.mp4", "Test1/AION/videos/41_ai.mp4", "Test1/AION/videos/001_ai.mp4", "Test2/AION/videos/01_ai.mp4", "Test1/AION/videos/../01_ai.mp4", "Test1/AION/videos/%2e%2e/01_ai.mp4", "Test1/AION/videos/01_ai.mp4/extra"]) {
+    assert.equal(isAllowedFormalVideoPath(path), false);
+  }
+});
+
 test("accepts only approved formal ECS video paths", async () => {
   const { isAllowedFormalVideoPath } = await loadHelper();
 
