@@ -43,12 +43,10 @@ type CompletedSession = {
 
 type AssessmentClientProps = {
   requiresOnlinePassword?: boolean;
-  baselineIdOnly?: boolean;
 };
 
 export default function AssessmentClient({
-  requiresOnlinePassword = false,
-  baselineIdOnly = false
+  requiresOnlinePassword = false
 }: AssessmentClientProps) {
   const [phase, setPhase] = useState<Phase>("intake");
   const [videoQueue, setVideoQueue] = useState<VideoQueueItem[]>([]);
@@ -89,7 +87,7 @@ export default function AssessmentClient({
   const videoStartedAtRef = useRef<number | null>(null);
   const videoEndedAtRef = useRef<number | null>(null);
   const normalizedParticipantId = participantId.trim().toUpperCase();
-  const parsedSessionNumber = baselineIdOnly ? 1 : Number.parseInt(sessionNumber, 10);
+  const parsedSessionNumber = Number.parseInt(sessionNumber, 10);
 
   useEffect(() => {
     if (!configured) {
@@ -164,26 +162,7 @@ export default function AssessmentClient({
 
     setIntakeError("");
 
-    if (baselineIdOnly) {
-      setPasswordVerificationInFlight(true);
-      try {
-        const response = await fetch("/api/baseline-access", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ participant_id: normalizedParticipantId })
-        });
-        const result = await response.json();
-        if (!response.ok || result.authorized !== true) {
-          setIntakeError(result.error ?? "Unable to start assessment.");
-          return;
-        }
-      } catch {
-        setIntakeError("Unable to start assessment. Please try again.");
-        return;
-      } finally {
-        setPasswordVerificationInFlight(false);
-      }
-    } else if (requiresOnlinePassword) {
+    if (requiresOnlinePassword) {
       setPasswordVerificationInFlight(true);
 
       try {
@@ -377,10 +356,6 @@ export default function AssessmentClient({
   };
 
   const prepareNewSession = () => {
-    if (baselineIdOnly) {
-      window.location.assign("/");
-      return;
-    }
     const currentSessionNumber = completedSession?.sessionNumber ?? parsedSessionNumber;
     const nextSessionNumber =
       isStudySessionNumber(currentSessionNumber) && currentSessionNumber < 3
@@ -438,7 +413,7 @@ export default function AssessmentClient({
               />
             </label>
 
-            {!baselineIdOnly && <label className="field">
+            <label className="field">
               <span>Session number</span>
               <select
                 onChange={(event) => setSessionNumber(event.target.value)}
@@ -450,10 +425,9 @@ export default function AssessmentClient({
                   </option>
                 ))}
               </select>
-            </label>}
+            </label>
 
             {requiresOnlinePassword && (
-              !baselineIdOnly &&
               <label className="field">
                 <span>Password</span>
                 <input

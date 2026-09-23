@@ -40,7 +40,6 @@ test('AI-ON isolated database: scoped intake, persistent routing, atomic submiss
     assert.equal(inspect(`SELECT count(*) FROM public.assessment_queue WHERE participant_id='${id}'`),'0');
     assert.ok(schedule(id).every(r=>r.opens === null));
   }
-  const baseline = (await import('../app/api/baseline-access/route.ts')).POST;
   const password = (await import('../app/api/online-password/route.ts')).POST;
   const start = (await import('../app/api/assessment-session/route.ts')).POST;
   const submit = (await import('../app/api/assessment-submit/route.ts')).POST;
@@ -49,22 +48,24 @@ test('AI-ON isolated database: scoped intake, persistent routing, atomic submiss
   let cookie='';
   const call = (handler, body, sessionCookie = cookie) => handler(new Request('http://127.0.0.1/api/test', { method:'POST', headers:{'content-type':'application/json',cookie:sessionCookie}, body:JSON.stringify(body) }));
   async function login(id) {
-    const response = await call(baseline,{participant_id:id});
+    const response = await call(password,{participant_id:id,session_number:1,password:'deskilling'+id});
     assert.equal(response.status,200); cookie=response.headers.get('set-cookie').split(';')[0];
   }
   const passed=[];
   async function step(name,fn) { await fn(); passed.push(name); console.log('PASS: '+name); }
   try {
-    await step('ID-only rejects P20/P41 and all client-selected sessions without changing Day 0',async()=>{
-      for (const id of ['P20','P41']) { assert.equal((await call(baseline,{participant_id:id})).status,403); assert.ok(schedule(id).every(r=>r.opens===null)); }
-      for (const session_number of [1,2,3]) assert.equal((await call(baseline,{participant_id:'P21',session_number})).status,403);
-      assert.ok(schedule('P21').every(r=>r.opens===null));
+    await step('all cohort boundaries reject missing/wrong passwords without changing Day 0',async()=>{
+      for (const id of ['P20','P21','P40','P41']) {
+        for (const session_number of [1,2,3]) for(const supplied of [undefined,'','wrong']) {
+          assert.equal((await call(password,{participant_id:id,session_number,password:supplied})).status,401);
+        }
+        assert.ok(schedule(id).every(r=>r.opens===null));
+      }
     });
     const queues={};
     await step('P20 OFF / P21 ON / P40 ON / P41 OFF: 40 persisted unique videos each',async()=>{
       for (const [id,condition] of [['P20','off'],['P21','on'],['P40','on'],['P41','off']]) {
-        if(condition==='on') await login(id);
-        else { const r=await call(password,{participant_id:id,session_number:1,password:'deskilling'+id}); assert.equal(r.status,200);cookie=r.headers.get('set-cookie').split(';')[0]; }
+        await login(id);
         const body={participant_id:id,session_number:1};
         const r=await call(start,body);assert.equal(r.status,200);
         const rows=(await r.json()).data;queues[id]=rows;

@@ -2,10 +2,11 @@
 
 ## Scope
 
-The separate `/baseline` page accepts Participant ID only. Its server endpoint
-accepts exactly P21-P40 and fixes Session 1. It invokes the existing Day 0 claim
-and issues the existing participant/session-bound HttpOnly cookie. `/` retains
-password/session intake, including subsequent sessions. No player, mark,
+The sole participant entry is `/`. Every participant supplies Participant ID,
+Session number and password, using the existing `/api/online-password` flow.
+There is no passwordless participant entry: `/baseline` and `/api/baseline-access`
+have been removed. Existing Day 0 claims, participant/session-bound HttpOnly
+cookies and subsequent-session controls are unchanged. No player, mark,
 submission, timing, Nginx, or video content changes are included.
 
 Formal Session 1 selects AI-ON for P21-P40 and AI-OFF for all other existing
@@ -51,7 +52,7 @@ transaction through code/build replacement and app health check; commit only
 after successful startup, otherwise roll back and restore the old code/build.
 Do not modify active environment, release, existing research rows, or MP4 files.
 Production verification uses read-only data checks and signed video delivery;
-ID-only successful login is tested in the isolated DB, not by starting real
+Successful participant login is tested in the isolated DB, not by starting real
 P21-P40 schedules. A previously accepted app alone is not a safe DB rollback
 after AI-ON data collection begins; preserve the split-pool routing and research
 records for any subsequent rollback.
