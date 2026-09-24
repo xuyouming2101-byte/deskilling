@@ -113,7 +113,7 @@ test('AI-ON isolated database: password roster through P100, S1 routing and OFF-
       assert.equal((await call(authorize,{...body,video_order:2})).status,403);
       const r=await call(authorize,{...body,video_order:1});assert.equal(r.status,200);
       const signed=(await r.json()).signed_url;
-      const url=new URL(signed,'http://127.0.0.1');assert.match(url.searchParams.get('path'),/^Test1\/AION\/videos\/[0-9]{2}_ai\.mp4$/);
+      const url=new URL(signed,'http://127.0.0.1');assert.match(url.searchParams.get('path'),/^Test1\/AION\/(?:videos\/[0-9]{2}_ai|H264\/[0-9]{2}_ai_h264)\.mp4$/);
       const streamed=await video(new Request(url));assert.equal(streamed.status,200);
       assert.equal(streamed.headers.get('x-accel-redirect'),'/_formal_video/'+url.searchParams.get('path'));
       url.searchParams.set('path','Test1/AION/videos/41_ai.mp4');assert.equal((await video(new Request(url))).status,403);

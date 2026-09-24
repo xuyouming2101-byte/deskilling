@@ -15,9 +15,11 @@ const FORMAL_VIDEO_PATH_PATTERN =
   /^Test([1-3])\/videos\/T\1_\d{3}\.mp4$/;
 const BASELINE_AION_PATH_PATTERN =
   /^Test1\/AION\/videos\/(0[1-9]|[12][0-9]|3[0-9]|40)_ai\.mp4$/;
+const BASELINE_AION_H264_PATH_PATTERN =
+  /^Test1\/AION\/H264\/(0[1-9]|[12][0-9]|3[0-9]|40)_ai_h264\.mp4$/;
 
 export function isAllowedFormalVideoPath(path: string) {
-  return FORMAL_VIDEO_PATH_PATTERN.test(path) || BASELINE_AION_PATH_PATTERN.test(path);
+  return FORMAL_VIDEO_PATH_PATTERN.test(path) || BASELINE_AION_PATH_PATTERN.test(path) || BASELINE_AION_H264_PATH_PATTERN.test(path);
 }
 
 function buildSigningPayload(path: string, expires: number) {
